@@ -9,13 +9,6 @@
 #define DA_REALLOC(ctx, ...) realloc(__VA_ARGS__)
 #define DA_FREE(ctx, ...) free(__VA_ARGS__)
 
-#define da_new(T)                                                              \
-  typedef struct {                                                             \
-    T *items;                                                                  \
-    size_t len;                                                                \
-    size_t capacity;                                                           \
-  } Dyn_Array_##T
-
 #define FOREACH_DA_ERROR(GEN_FUNC)                                             \
   GEN_FUNC(DA_SUCCESS)                                                         \
   GEN_FUNC(DA_FULL)
@@ -24,13 +17,27 @@
 #define STRING_GENERATOR(ENUM_FIELD) #ENUM_FIELD,
 
 typedef enum { FOREACH_DA_ERROR(ENUM_GENERATOR) } DA_ERROR;
-static const char *Da_Error_Strs[] = {FOREACH_DA_ERROR(STRING_GENERATOR)};
+static const char *Da_Error_Strs[]
+    __attribute__((unused)) = {FOREACH_DA_ERROR(STRING_GENERATOR)};
 #define DA_ErrToStr(DA_ERR) Da_Error_Strs[DA_ERR]
 
-// note(0xab3): everything below is kinda shit but idk how to do it in a better
-// way
+#define da_new(T)                                                              \
+  typedef struct {                                                             \
+    T *items;                                                                  \
+    size_t len;                                                                \
+    size_t capacity;                                                           \
+  } Dyn_Array_##T
 
-#define da_append(xs, x, __result)                                             \
+// note(shahzad): don't look at me we are not programming in zig here
+#define da_init(capacity, element_size)                                        \
+  {.items = DA_MALLOC(NULL, capacity * element_size),                          \
+   .len = 0,                                                                   \
+   .capacity = capacity}
+
+// note(shahzad): everything below is kinda shit but idk how to do it in a
+// better way
+
+#define da_append(alloc_ctx, xs, x, __result)                                  \
   __result = DA_SUCCESS;                                                       \
   if (xs.len >= xs.capacity) {                                                 \
     if (xs.capacity < DA_MAX_CAPACITY) {                                       \
@@ -38,7 +45,7 @@ static const char *Da_Error_Strs[] = {FOREACH_DA_ERROR(STRING_GENERATOR)};
         xs.capacity = 8;                                                       \
       else                                                                     \
         xs.capacity *= 2;                                                      \
-      xs.items = DA_REALLOC(NULL, xs.items, xs.capacity);         \
+      xs.items = DA_REALLOC(alloc_ctx, xs.items, xs.capacity);                 \
     } else {                                                                   \
       __result = DA_FULL;                                                      \
     }                                                                          \
@@ -65,9 +72,9 @@ static const char *Da_Error_Strs[] = {FOREACH_DA_ERROR(STRING_GENERATOR)};
 
 #define da_pop(xs) xs.len < 1 ? NULL : xs.items[--xs.len]
 
-#define da_deinit(array)                                                       \
+#define da_deinit(alloc_ctx, array)                                            \
   do {                                                                         \
-    DA_FREE(NULL, array.elem);                                                 \
+    DA_FREE(alloc_ctx, array.elem);                                            \
     array.len = 0;                                                             \
     array.capacity = 0;                                                        \
   } while (0)
