@@ -1,9 +1,10 @@
-#include "dyn_array.h"
+#include "./libs/base64.h"
 #include "websocket.h"
+#include <stddef.h>
 #include <stdio.h>
 
 #define BS_IMPLEMENTATION
-#include "bs.h"
+#include "./libs/bs.h"
 #include <assert.h>
 #include <bits/types/struct_iovec.h>
 #include <errno.h>
