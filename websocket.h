@@ -1,9 +1,8 @@
 #ifndef WEBSOCKET_H
 #define WEBSOCKET_H
-#include "bs.h"
+#include "./libs/bs.h"
 
-#include "dyn_array.h"
-#include "utils.h"
+#include "./libs/dyn_array.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <bits/types/struct_iovec.h>
@@ -21,9 +20,17 @@
 #define opaque_ptr_t void *
 #endif
 
+#define SEC_WEBSOCKET_KEY_LEN 16
+
 #define WS_LOG_DEBUG _LOG_DEBUG
 #define WS_LOG_WARN _LOG_WARN
 #define WS_LOG_ERROR _LOG_ERROR
+
+#define WS_ErrToStr(WS_ERR) Ws_Error_Strs[WS_ERR]
+
+#define WS_ALLOC(allocator_ctx, ...) malloc(__VA_ARGS__);
+#define WS_REALLOC(allocator_ctx, ...) realloc(__VA_ARGS__);
+#define WS_FREE(allocator_ctx, ...) free(__VA_ARGS__);
 
 typedef enum {
   WS_SUCCESS,
@@ -38,12 +45,6 @@ static const char *Ws_Error_Strs[] __attribute__((unused)) = {
 
 _Static_assert(WS_STATUS_COUNT == ARRAY_LEN(Ws_Error_Strs),
                "forgor💀 to add enum variant to Ws_Error_Strs");
-
-#define WS_ErrToStr(WS_ERR) Ws_Error_Strs[WS_ERR]
-
-#define WS_ALLOC(allocator_ctx, ...) malloc(__VA_ARGS__);
-#define WS_REALLOC(allocator_ctx, ...) realloc(__VA_ARGS__);
-#define WS_FREE(allocator_ctx, ...) free(__VA_ARGS__);
 
 da_new(BetterString_View);
 da_new(uint8_t);
