@@ -69,7 +69,8 @@ void ws_do_http_upgrade(Ws_Context *ctx) {
   size_t encoded_sec_websocket_key_len = 0;
   BASE64_STATUS base64_status =
       base64_encode(sec_websocket_key, 16, sec_websocket_key_base64, 64,
-                    &encoded_sec_websocket_key_len);
+                    &encoded_sec_websocket_key_len,
+                    (base64EncodeSettings){.padding = BASE64_ENCODE_PADDING});
   assert(base64_status == BASE64_STATUS_SUCCESS);
   BS_STATUS builder_status = BS_STATUS_OK;
 
