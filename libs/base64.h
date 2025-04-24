@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <xmmintrin.h>
 
 typedef struct base64EncodeSettings {
   enum {
@@ -45,32 +46,41 @@ BASE64_STATUS base64_encode_avx2(const uint8_t *__restrict buffer, size_t len,
   const size_t _6byte_aligned_len = len / 6;
 
   for (size_t i = 0; i < _6byte_aligned_len; i++) {
-    const __m256i mm_buf_orig =
+    const __m256i input_bytes_32 =
         _mm256_cvtepu8_epi32(_mm_loadu_si64((__m128i const *)buffer));
 
-    const __m256i mm_buffer_1 = _mm256_permutevar8x32_epi32(
-        mm_buf_orig, _mm256_setr_epi32(0, 0, 1, 2, 3, 3, 4, 5));
-    const __m256i and_buffer =
+    const __m256i input_bytes_16_1 = _mm256_permutevar8x32_epi32(
+        input_bytes_32, _mm256_setr_epi32(0, 0, 1, 2, 3, 3, 4, 5));
+    const __m256i input_bytes_16_1_and_mask =
         _mm256_broadcastsi128_si256(_mm_setr_epi32(0, 0x3, 0xf, 0x3f));
-    const __m256i and_result = _mm256_and_si256(mm_buffer_1, and_buffer);
+    const __m256i input_bytes_16_1_and_result =
+        _mm256_and_si256(input_bytes_16_1, input_bytes_16_1_and_mask);
 
-    const __m256i mm_buffer_2 = _mm256_permutevar8x32_epi32(
-        mm_buf_orig, _mm256_setr_epi32(0, 1, 2, 2, 3, 4, 5, 5));
+    const __m256i input_bytes_16_2 = _mm256_permutevar8x32_epi32(
+        input_bytes_32, _mm256_setr_epi32(0, 1, 2, 2, 3, 4, 5, 5));
 
-    __m256i shift_reg1 = _mm256_setr_epi32(8, 4, 2, 0, 8, 4, 2, 0);
-    __m256i shift_reg2 = _mm256_setr_epi32(2, 4, 6, 8, 2, 4, 6, 8);
+    __m256i input_byte_16_1_shift_mask =
+        _mm256_setr_epi32(8, 4, 2, 0, 8, 4, 2, 0);
+    __m256i input_byte_16_2_shift_mask =
+        _mm256_setr_epi32(2, 4, 6, 8, 2, 4, 6, 8);
 
-    const __m256i r1 = _mm256_sllv_epi32(and_result, shift_reg1);
-    const __m256i r2 = _mm256_srlv_epi32(mm_buffer_2, shift_reg2);
+    const __m256i input_byte_16_1_shift_result = _mm256_sllv_epi32(
+        input_bytes_16_1_and_result, input_byte_16_1_shift_mask);
+    const __m256i input_byte_16_2_shift_result =
+        _mm256_srlv_epi32(input_bytes_16_2, input_byte_16_2_shift_mask);
 
-    const __m256i r1_or_r2 = _mm256_or_si256(r1, r2);
-    const __m256i final_and = _mm256_set1_epi8(0x3f);
-    __m256i results = _mm256_and_si256(r1_or_r2, final_and);
+    const __m256i _16_1_or_16_2 = _mm256_or_si256(input_byte_16_1_shift_result,
+                                                  input_byte_16_2_shift_result);
+    const __m256i final_and_mask = _mm256_set1_epi8(0x3f);
+    __m256i results = _mm256_and_si256(_16_1_or_16_2, final_and_mask);
 
+    // note(shahzad): result is in 32bit and we want to pack it to 8 bits
+    // removing everything but the least significant byte, that's why we use
+    // this this shuffle mask
     __m256i shuffle_mask = _mm256_setr_epi8(
-        0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,       \
         0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
-      );
+        );
     __m256i shuffle_result = _mm256_shuffle_epi8(results, shuffle_mask);
     const __m256i packed8 = _mm256_permutevar8x32_epi32(
         shuffle_result, _mm256_setr_epi32(0, 0, 0, 0, 0, 4, 0, 0));
@@ -83,7 +93,7 @@ BASE64_STATUS base64_encode_avx2(const uint8_t *__restrict buffer, size_t len,
     // todo(shahzad): add simd here
     for (size_t j = 0; j < 8; j++) {
       output_buffer[encoded_b64_writer_idx++] =
-      (char)_get_base64_value_for_data((uint8_t)data[j]);
+          (char)_get_base64_value_for_data((uint8_t)data[j]);
     }
     buffer += 6;
     len -= 6;
