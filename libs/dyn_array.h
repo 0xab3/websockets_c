@@ -38,10 +38,10 @@
         (xs).capacity = 8;                                                     \
       else                                                                     \
         (xs).capacity *= 2;                                                    \
-      void *tmp_realloc =                                                      \
-          DA_REALLOC((xs).allocator_ctx, (xs).items, (xs).capacity);           \
+      void *tmp_realloc = DA_REALLOC((xs).allocator_ctx, (xs).items,           \
+                                     (xs).capacity * (sizeof(*(xs).items)));   \
       if (tmp_realloc == NULL) {                                               \
-        result = ALLOCATOR_OUT_OF_MEMORY;                                      \
+        __result = ALLOCATOR_OUT_OF_MEMORY;                                    \
       } else {                                                                 \
         /* NOTE: this brakes cpp compatibility, but if you use cpp then don't  \
          * use this library*/                                                  \
