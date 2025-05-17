@@ -1,32 +1,25 @@
 #ifndef DYN_ARRAY_H
 #define DYN_ARRAY_H
 
+#include "allocator.h"
 #include <stddef.h>
 #include <stdlib.h>
 
-#define DA_MAX_CAPACITY 256
 #define DA_MALLOC(ctx, ...) malloc(__VA_ARGS__)
 #define DA_REALLOC(ctx, ...) realloc(__VA_ARGS__)
 #define DA_FREE(ctx, ...) free(__VA_ARGS__)
 
-#define FOREACH_DA_ERROR(GEN_FUNC)                                             \
-  GEN_FUNC(DA_SUCCESS)                                                         \
-  GEN_FUNC(DA_FULL)
+#ifndef opaque_ptr_t
+#define opaque_ptr_t void *
+#endif // opaque_ptr_t
 
-#define ENUM_GENERATOR(ENUM_FIELD) ENUM_FIELD,
-#define STRING_GENERATOR(ENUM_FIELD) #ENUM_FIELD,
-
-typedef enum { FOREACH_DA_ERROR(ENUM_GENERATOR) } DA_ERROR;
-static const char *Da_Error_Strs[]
-    __attribute__((unused)) = {FOREACH_DA_ERROR(STRING_GENERATOR)};
-#define DA_ErrToStr(DA_ERR) Da_Error_Strs[DA_ERR]
-
-#define da_new(T)                                                              \
-  typedef struct {                                                             \
+#define da_type_new(T)                                                         \
+  {                                                                            \
+    opaque_ptr_t allocator_ctx;                                                \
     T *items;                                                                  \
     size_t len;                                                                \
     size_t capacity;                                                           \
-  } Dyn_Array_##T
+  }
 
 // note(shahzad): don't look at me we are not programming in zig here
 #define da_init(capacity, element_size)                                        \
@@ -37,21 +30,27 @@ static const char *Da_Error_Strs[]
 // note(shahzad): everything below is kinda shit but idk how to do it in a
 // better way
 
-#define da_append(alloc_ctx, xs, x, __result)                                  \
-  __result = DA_SUCCESS;                                                       \
-  if (xs.len >= xs.capacity) {                                                 \
-    if (xs.capacity < DA_MAX_CAPACITY) {                                       \
-      if (xs.capacity == 0)                                                    \
-        xs.capacity = 8;                                                       \
+#define da_append(xs, x, __result)                                             \
+  do {                                                                         \
+    __result = ALLOCATOR_SUCCESS;                                              \
+    if ((xs).len >= (xs).capacity) {                                           \
+      if ((xs).capacity == 0)                                                  \
+        (xs).capacity = 8;                                                     \
       else                                                                     \
-        xs.capacity *= 2;                                                      \
-      xs.items = DA_REALLOC(alloc_ctx, xs.items, xs.capacity);                 \
-    } else {                                                                   \
-      __result = DA_FULL;                                                      \
+        (xs).capacity *= 2;                                                    \
+      void *tmp_realloc =                                                      \
+          DA_REALLOC((xs).allocator_ctx, (xs).items, (xs).capacity);           \
+      if (tmp_realloc == NULL) {                                               \
+        result = ALLOCATOR_OUT_OF_MEMORY;                                      \
+      } else {                                                                 \
+        /* NOTE: this brakes cpp compatibility, but if you use cpp then don't  \
+         * use this library*/                                                  \
+        (xs).items = tmp_realloc;                                              \
+      }                                                                        \
     }                                                                          \
-  }                                                                            \
-  if (__result == DA_SUCCESS)                                                  \
-    xs.items[xs.len++] = x;
+    if (__result == ALLOCATOR_SUCCESS)                                         \
+      (xs).items[(xs).len++] = x;                                              \
+  } while (0);
 
 #define da_remove_swap(xs, index)                                              \
   do {                                                                         \
