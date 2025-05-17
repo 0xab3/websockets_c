@@ -1,15 +1,13 @@
-#ifndef WEBSOCKET_H
-#define WEBSOCKET_H
+#ifndef __WEBSOCKET_H__
+#define __WEBSOCKET_H__
 #include "./libs/bs.h"
-
-#include "./libs/dyn_array.h"
+#include "libs/utils.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <bits/types/struct_iovec.h>
 #include <netinet/in.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <sys/cdefs.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -18,7 +16,7 @@
 
 #ifndef opaque_ptr_t
 #define opaque_ptr_t void *
-#endif
+#endif // opaque_ptr_t
 
 #define SEC_WEBSOCKET_KEY_LEN 16
 
@@ -46,10 +44,6 @@ static const char *Ws_Error_Strs[] __attribute__((unused)) = {
 _Static_assert(WS_STATUS_COUNT == ARRAY_LEN(Ws_Error_Strs),
                "forgor💀 to add enum variant to Ws_Error_Strs");
 
-da_new(BetterString_View);
-da_new(uint8_t);
-
-#define Ws_Buffer Dyn_Array_uint8_t
 
 typedef struct {
   opaque_ptr_t ctx;
@@ -57,7 +51,7 @@ typedef struct {
 
 typedef struct {
   Ws_AllocatorCtx allocator_ctx; // mark(unused)
-  Ws_Buffer data;
+  opaque_ptr_t data;
   int tcp_fd;
   char padding[4];
 } Ws_Context;
@@ -69,4 +63,4 @@ WS_STATUS ws_send_http_upgdate_request(Ws_Context *ctx,
                                        const BetterString_View *request);
 void ws_do_http_upgrade(Ws_Context *ctx);
 
-#endif
+#endif // __WEBSOCKET_H__
