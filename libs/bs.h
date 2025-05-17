@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdnoreturn.h>
 #include <string.h>
@@ -78,6 +79,8 @@ BSDEF ssize_t bs_find(BetterString_View haysack, BetterString_View needle);
 BSDEF ssize_t bs_char_at(BetterString_View haysack, char needle);
 BSDEF bool bs_eq(BetterString_View s1, BetterString_View s2);
 BSDEF bool bs_eq_ignore_case(BetterString_View s1, BetterString_View s2);
+static inline BSDEF ALLOCATOR_STATUS bs_escape(BetterString_View str,
+                                               BetterString_View *output);
 
 BSDEF BetterString_Builder bs_builder_new(opaque_ptr_t allocator_ctx);
 BSDEF void bs_builder_destory(BetterString_Builder *builder);
@@ -135,6 +138,8 @@ BSDEF ALLOCATOR_STATUS bs_clone(opaque_ptr_t allocator_ctx,
 }
 
 BSDEF BetterString_View bs_trim(BetterString_View str) {
+  if (str.len == 0)
+    return str;
   assert(str.view != NULL);
   BetterString_View trimmed = str;
   trimmed = bs_trim_right(trimmed);
@@ -142,12 +147,16 @@ BSDEF BetterString_View bs_trim(BetterString_View str) {
   return trimmed;
 }
 BSDEF BetterString_View bs_trim_right(BetterString_View str) {
+  if (str.len == 0)
+    return str;
   assert(str.view != NULL);
   BetterString_View trimmed = str;
-  size_t idx = str.len;
-  while (isspace(trimmed.view[idx]) && idx > 0)
+  size_t idx = str.len - 1;
+  while (isspace(trimmed.view[idx]) && idx > 0) {
     idx--;
-  trimmed.len -= idx;
+  }
+
+  trimmed.len = idx + 1;
   return trimmed;
 }
 
@@ -171,7 +180,7 @@ BSDEF bool bs_eq(BetterString_View s1, BetterString_View s2) {
   if (s1.len != s2.len) {
     return false;
   }
-  return memcmp(s1.view, s2.view, MAX(s1.len, s2.len)) == 0;
+  return memcmp(s1.view, s2.view, s1.len) == 0;
 }
 BSDEF bool bs_eq_ignore_case(BetterString_View s1, BetterString_View s2) {
   if (s1.len != s2.len) {
@@ -182,10 +191,16 @@ BSDEF bool bs_eq_ignore_case(BetterString_View s1, BetterString_View s2) {
 }
 BSDEF ssize_t bs_find(BetterString_View haysack, BetterString_View needle) {
   BetterString_View window = bs_from_string(haysack.view, needle.len);
+
   size_t i = 0;
   while (haysack.len - i >= window.len) {
-    _LOG_DEBUG("window: \"" BSV_Fmt "\"\n", BSV_Arg(window));
-    _LOG_DEBUG("needle: \"" BSV_Fmt "\"\n", BSV_Arg(needle));
+    BetterString_View window_escaped = {0};
+    ALLOCATOR_STATUS escape_result = bs_escape(window, &window_escaped);
+    assert(escape_result == ALLOCATOR_SUCCESS);
+
+    BetterString_View needle_escaped = {0};
+    escape_result = bs_escape(needle, &needle_escaped);
+    assert(escape_result == ALLOCATOR_SUCCESS);
     if (bs_eq(window, needle)) {
       return (ssize_t)i;
     }
@@ -208,10 +223,12 @@ BSDEF BetterString_View bs_split_once_by_bs(BetterString_View *str,
 
   BetterString_View chopped = {0};
   const ssize_t idx = bs_find(*str, bs_delim);
+  // todo(shahzad): remove this shit
+  assert(idx != -1);
   if (idx == -1) {
     return chopped;
   }
-  assert((size_t)idx + bs_delim.len < str->len);
+  assert((size_t)idx + bs_delim.len <= str->len);
 
   chopped.view = str->view;
   chopped.len = (size_t)idx;
@@ -225,7 +242,9 @@ BSDEF BetterString_View bs_split_once_by_delim(BetterString_View *str,
                                                char delim) {
   BetterString_View chopped = {0};
   const ssize_t char_idx = bs_char_at(*str, delim);
+  // todo(shahzad): remove this shit
   if (char_idx == -1) {
+    assert(0);
     return chopped;
   }
   assert((size_t)char_idx <= str->len);
@@ -238,12 +257,57 @@ BSDEF BetterString_View bs_split_once_by_delim(BetterString_View *str,
   str->len -= (size_t)char_idx + 1;
   return chopped;
 }
-// writer MUST write all the data that is provided to it
-static inline BSDEF ssize_t bs_escape(BetterString_View str,
-                                      opaque_ptr_t userdata,
-                                      ssize_t(writer)(BetterString_View str,
-                                                      opaque_ptr_t userdata)) {
 
+// todo(shahzad): throwaway function
+static inline BSDEF ALLOCATOR_STATUS bs_escape(BetterString_View str,
+                                               BetterString_View *output) {
+  BetterString_Builder builder = {0};
+  for (size_t i = 0; i < str.len; i++) {
+    bool skip = false;
+    char escaped_char[3] = {0};
+    escaped_char[0] = '\\';
+    switch (str.view[i]) {
+    case '\0': escaped_char[1] = '0'; break;
+    case '\a': escaped_char[1] = 'a'; break;
+    case '\b': escaped_char[1] = 'b'; break;
+    case '\f': escaped_char[1] = 'f'; break;
+    case '\n': escaped_char[1] = 'n'; break;
+    case '\r': escaped_char[1] = 'r'; break;
+    case '\t': escaped_char[1] = 't'; break;
+    case '\v': escaped_char[1] = 'v'; break;
+    case '\\': escaped_char[1] = '\\'; break;
+    case '\?': escaped_char[1] = '\?'; break;
+    case '\'': escaped_char[1] = '\''; break;
+    case '\"': escaped_char[1] = '\"'; break;
+    default:
+      bs_builder_append_sv(&builder,
+                           (BetterString_View){.view = str.view + i, .len = 1});
+      skip = true;
+      break;
+      // burh this shit sucks ass
+    }
+    if (skip) {
+      continue;
+    }
+    const ALLOCATOR_STATUS ret = bs_builder_append_cstr(&builder, escaped_char);
+    if (ret != ALLOCATOR_SUCCESS) {
+      // note(shahzad): remove this
+      assert(ret == ALLOCATOR_OUT_OF_MEMORY);
+      return ret;
+    }
+  }
+  *output = bs_builder_to_sv(&builder);
+  return ALLOCATOR_SUCCESS;
+}
+
+// writer MUST write all the data that is provided to it
+// i don't wanna implement this right now
+static inline BSDEF ssize_t bs_escape_wid_writer(
+    BetterString_View str, opaque_ptr_t userdata,
+    ssize_t(writer)(BetterString_View str, opaque_ptr_t userdata));
+static inline BSDEF ssize_t bs_escape_wid_writer(
+    BetterString_View str, opaque_ptr_t userdata,
+    ssize_t(writer)(BetterString_View str, opaque_ptr_t userdata)) {
   static char escaped[BS_ESCAPE_BUFFER_MAX_SIZE] = {0};
   size_t escaped_idx = 0;
   for (size_t i = 0; i < str.len; i++) {
@@ -270,7 +334,7 @@ static inline BSDEF ssize_t bs_escape(BetterString_View str,
       ssize_t bytes_written =
           writer(bs_from_string(escaped, escaped_idx), userdata);
       if (bytes_written != (ssize_t)escaped_idx) {
-        _LOG_ERROR("writter failed at index: ")
+        _LOG_ERROR("writter failed at index: %lu\n", escaped_idx);
         return bytes_written;
       }
     }
@@ -286,6 +350,7 @@ static inline BSDEF ssize_t bs_escape(BetterString_View str,
       return bytes_written;
     }
   }
+  return (ssize_t)escaped_idx;
 }
 
 BSDEF BetterString_Builder bs_builder_new(opaque_ptr_t allocator_ctx) {
