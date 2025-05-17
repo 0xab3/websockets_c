@@ -2,12 +2,12 @@
 
 typedef struct splitmix64Ctx {
   uint64_t seed;
-}splitmix64Ctx;
+} splitmix64Ctx;
 
 splitmix64Ctx splitmix64_init(uint64_t seed);
 uint64_t splitmix64_next(splitmix64Ctx *ctx);
 
-splitmix64Ctx splitmix64_init(uint64_t seed){
+splitmix64Ctx splitmix64_init(uint64_t seed) {
   return (splitmix64Ctx){.seed = seed};
 }
 uint64_t splitmix64_next(splitmix64Ctx *ctx) {

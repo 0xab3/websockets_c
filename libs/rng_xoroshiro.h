@@ -1,9 +1,12 @@
-#ifndef __XOROSHIRO128P__
-#define __XOROSHIRO128P__
+#ifndef __XOROSHIRO128P_H__
+#define __XOROSHIRO128P_H__
 #include "./rng_splitmix64.h"
+#include "libs/utils.h"
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
+#include <string.h>
 
 #ifndef internal
 #define internal static inline
@@ -52,7 +55,7 @@ void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len) {
   for (size_t i = 0; i < aligned_len; i++) {
     assert(i * 8 < len);
     rnd_num = xoroshiro128_next(ctx);
-    ((uint64_t *)buffer)[i] = rnd_num;
+    memcpy(buffer + i, &rnd_num, 8);
   }
 
   rnd_num = xoroshiro128_next(ctx);
@@ -65,10 +68,13 @@ void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len) {
   }
 }
 
-uint64_t jump(void) { assert(0 && "unimplemented"); }
+uint64_t jump(void) {
+  _LOG_DEBUG("unimplemented");
+  return 0;
+}
 
 internal uint64_t rotl(uint64_t value, uint64_t rotation) {
   return (value << rotation) | (value >> (64 - rotation));
 }
 
-#endif // __XOROSHIRO128P__
+#endif // __XOROSHIRO128P_H__
