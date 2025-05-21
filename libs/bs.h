@@ -1,7 +1,7 @@
 #ifndef __BS_H__
 #define __BS_H__
 
-#include "allocator.h"
+#include "libs/allocator.h"
 #include "utils.h"
 #include <assert.h>
 #include <ctype.h>
@@ -11,7 +11,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdnoreturn.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/cdefs.h>
@@ -62,10 +61,8 @@ typedef struct {
 //  every function that works on builder is prefixed by bs_builder
 
 BSDEF BetterString_View bs_from_string(const char *data, size_t len);
-BSDEF ALLOCATOR_STATUS bs_clone(opaque_ptr_t allocator_ctx,
-                                BetterString_View str,
-                                BetterString_ViewManaged *result)
-    __nonnull((3));
+BSDEF BetterString_ViewManaged bs_clone(opaque_ptr_t allocator_ctx,
+                                        BetterString_View str);
 BSDEF BetterString_View bs_trim(BetterString_View str);
 BSDEF BetterString_View bs_trim_right(BetterString_View str);
 BSDEF BetterString_View bs_trim_left(BetterString_View str);
@@ -79,10 +76,10 @@ BSDEF ssize_t bs_find(BetterString_View haysack, BetterString_View needle);
 BSDEF ssize_t bs_char_at(BetterString_View haysack, char needle);
 BSDEF bool bs_eq(BetterString_View s1, BetterString_View s2);
 BSDEF bool bs_eq_ignore_case(BetterString_View s1, BetterString_View s2);
-static inline BSDEF ALLOCATOR_STATUS bs_escape(BetterString_View str,
-                                               BetterString_View *output);
+static inline BSDEF BetterString_View bs_escape(BetterString_View st);
 
 BSDEF BetterString_Builder bs_builder_new(opaque_ptr_t allocator_ctx);
+BSDEF BetterString_Builder bs_builder_new_alloc(opaque_ptr_t allocator_ctx, size_t capacity);
 BSDEF void bs_builder_destory(BetterString_Builder *builder);
 static __always_inline void bs_builder_reset(BetterString_Builder *builder);
 BSDEF BetterString_View bs_builder_to_sv(BetterString_Builder *builder);
@@ -119,24 +116,20 @@ BSDEF ALLOCATOR_STATUS bs_builder_append_cstr(BetterString_Builder *builder,
 BSDEF BetterString_View bs_from_string(const char *data, size_t len) {
   return (BetterString_View){.view = data, .len = len};
 }
-BSDEF ALLOCATOR_STATUS bs_clone(opaque_ptr_t allocator_ctx,
-                                BetterString_View str,
-                                BetterString_ViewManaged *result) {
+BSDEF BetterString_ViewManaged bs_clone(opaque_ptr_t allocator_ctx,
+                                        BetterString_View str) {
   BetterString_Builder bs_builder = bs_builder_new(allocator_ctx);
   ALLOCATOR_STATUS status = bs_builder_reserve_exact(&bs_builder, str.len);
   if (status != ALLOCATOR_SUCCESS) {
     assert(status == ALLOCATOR_OUT_OF_MEMORY);
-    return status;
+    return (BetterString_ViewManaged){0};
   }
-
   // copy the data, fuck dry!
   memcpy(bs_builder.string.data, str.view, str.len);
   bs_builder.string.len = str.len;
-
-  *result = bs_builder_to_managed_sv(&bs_builder);
-  return ALLOCATOR_SUCCESS;
+  BetterString_ViewManaged managed = bs_builder_to_managed_sv(&bs_builder);
+  return managed;
 }
-
 BSDEF BetterString_View bs_trim(BetterString_View str) {
   if (str.len == 0)
     return str;
@@ -194,13 +187,6 @@ BSDEF ssize_t bs_find(BetterString_View haysack, BetterString_View needle) {
 
   size_t i = 0;
   while (haysack.len - i >= window.len) {
-    BetterString_View window_escaped = {0};
-    ALLOCATOR_STATUS escape_result = bs_escape(window, &window_escaped);
-    assert(escape_result == ALLOCATOR_SUCCESS);
-
-    BetterString_View needle_escaped = {0};
-    escape_result = bs_escape(needle, &needle_escaped);
-    assert(escape_result == ALLOCATOR_SUCCESS);
     if (bs_eq(window, needle)) {
       return (ssize_t)i;
     }
@@ -259,8 +245,7 @@ BSDEF BetterString_View bs_split_once_by_delim(BetterString_View *str,
 }
 
 // todo(shahzad): throwaway function
-static inline BSDEF ALLOCATOR_STATUS bs_escape(BetterString_View str,
-                                               BetterString_View *output) {
+static inline BSDEF BetterString_View bs_escape(BetterString_View str) {
   BetterString_Builder builder = {0};
   for (size_t i = 0; i < str.len; i++) {
     bool skip = false;
@@ -293,11 +278,10 @@ static inline BSDEF ALLOCATOR_STATUS bs_escape(BetterString_View str,
     if (ret != ALLOCATOR_SUCCESS) {
       // note(shahzad): remove this
       assert(ret == ALLOCATOR_OUT_OF_MEMORY);
-      return ret;
+      return (BetterString_View){0};
     }
   }
-  *output = bs_builder_to_sv(&builder);
-  return ALLOCATOR_SUCCESS;
+  return bs_builder_to_sv(&builder);
 }
 
 // writer MUST write all the data that is provided to it
@@ -355,7 +339,18 @@ static inline BSDEF ssize_t bs_escape_wid_writer(
 
 BSDEF BetterString_Builder bs_builder_new(opaque_ptr_t allocator_ctx) {
   return (BetterString_Builder){
-      .string = {.data = NULL, .len = 0},
+      .string = {.data = NULL, .len = 0, .capacity = 0},
+      .allocator_ctx = allocator_ctx,
+  };
+}
+
+BSDEF BetterString_Builder bs_builder_new_alloc(opaque_ptr_t allocator_ctx, size_t capacity) {
+  char *alloc = BS_ALLOC(allocator_ctx,capacity);
+  if (alloc == NULL){
+    return (BetterString_Builder) {0};
+  }
+  return (BetterString_Builder){
+      .string = {.data = alloc, .len = 0,.capacity = capacity},
       .allocator_ctx = allocator_ctx,
   };
 }
