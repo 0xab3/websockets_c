@@ -1,9 +1,7 @@
 #include "./base64.h"
 #include "libs/utils.h"
+#include <assert.h>
 #include <ctype.h>
-#include <emmintrin.h>
-#include <immintrin.h>
-#include <mmintrin.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -16,7 +14,7 @@ BASE64_STATUS base64_encode(const uint8_t *__restrict buffer, size_t len,
                             char *__restrict output_buffer, size_t output_len,
                             size_t *encoded_b64_len,
                             base64EncodeSettings settings) {
-  if (output_len < BASE64_ENCODE_MIN_OUTPUT_BUFFER_SIZE(len)) {
+  if (output_len < BASE64_ENCODE_REQUIRED_OUTPUT_BUFFER_SIZE(len)) {
     return BASE64_STATUS_ERROR_DESTINATION_BUFFER_TOO_SMALL;
   }
   const size_t remaining_bytes = len % 3;
@@ -41,14 +39,16 @@ BASE64_STATUS base64_encode(const uint8_t *__restrict buffer, size_t len,
   switch (remaining_bytes) {
   case 0: break;
   case 1:
-    output_quad[0] = (buffer[aligned_3_byte_len + 0] >> 2) & 0x3f;
-    output_quad[1] = (buffer[aligned_3_byte_len + 0] << 4) & 0x3f;
+    output_quad[0] = (buffer[aligned_3_byte_len] >> 2) & 0x3f;
+    output_quad[1] = ((buffer[aligned_3_byte_len] & 0x03) << 4) & 0x3f;
     _base64_value_for_data(output_quad, 2, output_buffer + output_buffer_idx);
     output_buffer_idx += 2;
     break;
   case 2:
-    output_quad[0] = (buffer[aligned_3_byte_len + 0] >> 2) & 0x3f;
-    output_quad[1] = (buffer[aligned_3_byte_len + 0] << 4) & 0x3f;
+    output_quad[0] = ((unsigned char)buffer[aligned_3_byte_len + 0] >> 2);
+    output_quad[1] = (((buffer[aligned_3_byte_len + 0] & 3) << 4) |
+                      ((buffer[aligned_3_byte_len + 1] >> 4))) &
+                     0x3f;
     output_quad[2] = (buffer[aligned_3_byte_len + 1] << 2) & 0x3f;
     _base64_value_for_data(output_quad, 3, output_buffer + output_buffer_idx);
     output_buffer_idx += 3;
@@ -75,7 +75,7 @@ BASE64_STATUS base64_decode(const char *__restrict buffer, size_t len,
                             size_t *encoded_b64_len) {
 
   // todo(shahzad)!: better names
-  if (output_len < BASE64_DECODE_MIN_OUTPUT_BUFFER_SIZE(len)) {
+  if (output_len < BASE64_DECODE_REQUIRED_OUTPUT_BUFFER_SIZE(len)) {
     return BASE64_STATUS_ERROR_DESTINATION_BUFFER_TOO_SMALL;
   }
   const size_t remaining_bytes = len % 4;

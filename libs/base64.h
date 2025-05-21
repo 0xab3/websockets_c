@@ -13,10 +13,10 @@
 #include <string.h>
 #include <xmmintrin.h>
 
-#define BASE64_ENCODE_MIN_OUTPUT_BUFFER_SIZE(input_length)                     \
+#define BASE64_ENCODE_REQUIRED_OUTPUT_BUFFER_SIZE(input_length)                     \
   (size_t)((((input_length) + 2) / 3) * 4)
 
-#define BASE64_DECODE_MIN_OUTPUT_BUFFER_SIZE(input_length)                     \
+#define BASE64_DECODE_REQUIRED_OUTPUT_BUFFER_SIZE(input_length)                     \
   (size_t)(((input_length) / 4) * 3)
 
 typedef enum {
