@@ -1,7 +1,6 @@
 #ifndef DYN_ARRAY_H
 #define DYN_ARRAY_H
 
-#include "allocator.h"
 #include <stddef.h>
 #include <stdlib.h>
 
@@ -30,26 +29,28 @@
 // note(shahzad): everything below is kinda shit but idk how to do it in a
 // better way
 
-#define da_append(xs, x, __result)                                             \
+#define da_append(xs, x, __result_ptr)                                         \
   do {                                                                         \
-    __result = ALLOCATOR_SUCCESS;                                              \
+    __result_ptr = NULL;                                                       \
+    void *tmp_realloc = NULL;                                                  \
     if ((xs).len >= (xs).capacity) {                                           \
       if ((xs).capacity == 0)                                                  \
         (xs).capacity = 8;                                                     \
       else                                                                     \
         (xs).capacity *= 2;                                                    \
-      void *tmp_realloc = DA_REALLOC((xs).allocator_ctx, (xs).items,           \
-                                     (xs).capacity * (sizeof(*(xs).items)));   \
-      if (tmp_realloc == NULL) {                                               \
-        __result = ALLOCATOR_OUT_OF_MEMORY;                                    \
-      } else {                                                                 \
+      tmp_realloc = DA_REALLOC((xs).allocator_ctx, (xs).items,                 \
+                               (xs).capacity * (sizeof(*(xs).items)));         \
+      if (tmp_realloc != NULL) {                                               \
         /* NOTE: this brakes cpp compatibility, but if you use cpp then don't  \
          * use this library*/                                                  \
+        __result_ptr = tmp_realloc;                                            \
         (xs).items = tmp_realloc;                                              \
       }                                                                        \
     }                                                                          \
-    if (__result == ALLOCATOR_SUCCESS)                                         \
+    if (__result_ptr == tmp_realloc) {                                         \
       (xs).items[(xs).len++] = x;                                              \
+      __result_ptr = (xs).items + (xs).len;                                    \
+    }                                                                          \
   } while (0);
 
 #define da_remove_swap(xs, index)                                              \
