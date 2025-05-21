@@ -3,6 +3,11 @@
 
 #include <assert.h>
 #include <stdio.h>
+
+#ifndef opaque_ptr_t
+#define opaque_ptr_t void *
+#endif // opaque_ptr_t
+       //
 #define _LOG_DEBUG(...)                                                        \
   do {                                                                         \
     fprintf(stderr, "DEBUG: %s(): ", __func__);                                \
@@ -25,8 +30,16 @@
 #define ARRAY_LEN(xs) sizeof(xs) / sizeof(xs[0])
 #define _TODO(...) assert(0 && "TODO: "__VA_ARGS__)
 
+#define _LIKELY(x) __builtin_expect((bool)x, 1);
+#define _UNLIKELY(x) __builtin_expect((bool)x, 0);
+
 // why do even cstdlib exist =|
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+#define ROTL64(value, rotation)                                                \
+  (((value) << (rotation)) | ((value) >> (64 - (rotation))))
+#define ROTL32(value, rotation)                                                \
+  (((value) << (rotation)) | ((value) >> (32 - (rotation))))
 
 #endif // __SHITTY_AHH_UTILS_H__

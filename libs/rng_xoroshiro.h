@@ -2,15 +2,13 @@
 #define __XOROSHIRO128P_H__
 #include "./rng_splitmix64.h"
 #include "libs/utils.h"
+#include "websocket.h"
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdnoreturn.h>
 #include <string.h>
-
-#ifndef internal
-#define internal static inline
-#endif // internal
 
 typedef struct xoroshiro128Ctx {
   uint64_t rnd[2];
@@ -20,7 +18,6 @@ xoroshiro128Ctx xoroshiro128_init(uint64_t seed);
 uint64_t xoroshiro128_next(xoroshiro128Ctx *ctx);
 void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len);
 uint64_t jump(void);
-internal uint64_t rotl(uint64_t value, uint64_t rotation);
 
 xoroshiro128Ctx xoroshiro128_init(uint64_t seed) {
   splitmix64Ctx splitmix64_ctx = splitmix64_init(seed);
@@ -40,14 +37,14 @@ uint64_t xoroshiro128_next(xoroshiro128Ctx *ctx) {
   const uint64_t C = 36;
 
   s1 ^= s0;
-  s[0] = rotl(s0, A) ^ s1 ^ (s1 << B);
-  s[1] = rotl(s1, C);
+  s[0] = ROTL64(s0, A) ^ s1 ^ (s1 << B);
+  s[1] = ROTL64(s1, C);
 
   return result;
 }
 
 void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len) {
-  // note(shahzad): ik this is very bad but idk how to do it better
+  // note(shahzad): fix the alignment issues
   uint64_t rnd_num = 0;
   const size_t aligned_len = len / 8;
   const size_t remaining_unaligned_len = len % 8;
@@ -55,7 +52,7 @@ void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len) {
   for (size_t i = 0; i < aligned_len; i++) {
     assert(i * 8 < len);
     rnd_num = xoroshiro128_next(ctx);
-    memcpy(buffer + i, &rnd_num, 8);
+    memcpy(buffer + (i * 8), &rnd_num, 8);
   }
 
   rnd_num = xoroshiro128_next(ctx);
@@ -71,10 +68,6 @@ void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len) {
 uint64_t jump(void) {
   _LOG_DEBUG("unimplemented");
   return 0;
-}
-
-internal uint64_t rotl(uint64_t value, uint64_t rotation) {
-  return (value << rotation) | (value >> (64 - rotation));
 }
 
 #endif // __XOROSHIRO128P_H__
