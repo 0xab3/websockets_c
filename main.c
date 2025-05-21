@@ -1,10 +1,9 @@
-#include "./libs/base64.h"
 #include "websocket.h"
-#include <stddef.h>
-#include <stdio.h>
 
 #define BS_IMPLEMENTATION
 #include "./libs/bs.h"
+#include <stddef.h>
+
 #include <assert.h>
 #include <bits/types/struct_iovec.h>
 #include <errno.h>
@@ -26,6 +25,5 @@ int main(void) {
   }
 
   ws_do_http_upgrade(&ctx);
-
   return EXIT_SUCCESS;
 }
