@@ -62,11 +62,9 @@ BASE64_STATUS base64_encode(const uint8_t *__restrict buffer, size_t len,
   if (settings.padding == BASE64_ENCODE_PADDING) {
     for (size_t i = 0; i < output_buffer_idx % 4; i++) {
       output_buffer[output_buffer_idx++] = '=';
-      assert(output_buffer_idx < output_len);
+      assert(output_buffer_idx <= output_len);
     }
   }
-  output_buffer[output_buffer_idx + 1] = 0;
-  assert(output_buffer_idx < output_len);
   *encoded_b64_len = output_buffer_idx;
   return BASE64_STATUS_SUCCESS;
 }
