@@ -79,7 +79,8 @@ BSDEF bool bs_eq_ignore_case(BetterString_View s1, BetterString_View s2);
 static inline BSDEF BetterString_View bs_escape(BetterString_View st);
 
 BSDEF BetterString_Builder bs_builder_new(opaque_ptr_t allocator_ctx);
-BSDEF BetterString_Builder bs_builder_new_alloc(opaque_ptr_t allocator_ctx, size_t capacity);
+BSDEF BetterString_Builder bs_builder_new_alloc(opaque_ptr_t allocator_ctx,
+                                                size_t capacity);
 BSDEF void bs_builder_destory(BetterString_Builder *builder);
 static __always_inline void bs_builder_reset(BetterString_Builder *builder);
 BSDEF BetterString_View bs_builder_to_sv(BetterString_Builder *builder);
@@ -274,10 +275,11 @@ static inline BSDEF BetterString_View bs_escape(BetterString_View str) {
     if (skip) {
       continue;
     }
-    const ALLOCATOR_STATUS ret = bs_builder_append_cstr(&builder, escaped_char);
-    if (ret != ALLOCATOR_SUCCESS) {
+    const ALLOCATOR_STATUS escape_char_append_status =
+        bs_builder_append_cstr(&builder, escaped_char);
+    if (escape_char_append_status != ALLOCATOR_SUCCESS) {
       // note(shahzad): remove this
-      assert(ret == ALLOCATOR_OUT_OF_MEMORY);
+      assert(escape_char_append_status == ALLOCATOR_OUT_OF_MEMORY);
       return (BetterString_View){0};
     }
   }
@@ -344,13 +346,14 @@ BSDEF BetterString_Builder bs_builder_new(opaque_ptr_t allocator_ctx) {
   };
 }
 
-BSDEF BetterString_Builder bs_builder_new_alloc(opaque_ptr_t allocator_ctx, size_t capacity) {
-  char *alloc = BS_ALLOC(allocator_ctx,capacity);
-  if (alloc == NULL){
-    return (BetterString_Builder) {0};
+BSDEF BetterString_Builder bs_builder_new_alloc(opaque_ptr_t allocator_ctx,
+                                                size_t capacity) {
+  char *alloc = BS_ALLOC(allocator_ctx, capacity);
+  if (alloc == NULL) {
+    return (BetterString_Builder){0};
   }
   return (BetterString_Builder){
-      .string = {.data = alloc, .len = 0,.capacity = capacity},
+      .string = {.data = alloc, .len = 0, .capacity = capacity},
       .allocator_ctx = allocator_ctx,
   };
 }
@@ -381,12 +384,12 @@ bs_builder_to_managed_sv(BetterString_Builder *builder) {
 
 // type conversion is ass so implementing this shit
 static inline size_t log2i(size_t number) {
-  size_t ret = 0;
+  size_t bits = 0;
   while (number != 0) {
     number = number >> 1;
-    ret++;
+    bits++;
   }
-  return ret;
+  return bits;
 }
 BSDEF ALLOCATOR_STATUS bs_builder_reserve(BetterString_Builder *builder,
                                           size_t capacity) {
