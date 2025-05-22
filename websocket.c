@@ -33,6 +33,11 @@ typedef struct _httpPayload {
   const char *body;
 } _httpPayload;
 
+// note(shahzad): c doesn't support returning array from function
+typedef struct _secWebsocketKey {
+  char data[SEC_WEBSOCKET_KEY_LEN];
+} _secWebsocketKey;
+
 static _httpHeader *_http_payload_header_get(_httpPayload *payload,
                                              BetterString_View key) {
   // i know hash map exists
@@ -54,6 +59,8 @@ static inline void _http_payload_append_header(_httpPayload *payload,
 }
 static inline ALLOCATOR_STATUS _http_parse_header(_httpPayload *payload,
                                                   BetterString_View *request) {
+
+  // _TODO("FIXME!: this function can't return allocator status.");
   // todo(shahzad)!: use arena allocator
   if (payload->http_line.view == NULL || payload->http_line.len == 0) {
     BetterString_View http_line = bs_split_once_by_bs(request, BSV("\r\n"));
@@ -95,37 +102,53 @@ static inline ALLOCATOR_STATUS _http_parse_header(_httpPayload *payload,
   }
   return ALLOCATOR_SUCCESS;
 }
+
+static inline BetterString_View _http_status_code(_httpPayload *payload) {
+  // todo!(shahzad): parse this shit to an integer
+  if (payload->http_line.view == NULL) {
+    return (BetterString_View){0};
+  }
+  BetterString_ViewManaged http_line = payload->http_line;
+  BetterString_View code =
+      bs_split_once_by_bs((BetterString_View *)&http_line, BSV(" "));
+  code = bs_split_once_by_bs((BetterString_View *)&http_line, BSV(" "));
+  assert(code.view != NULL);
+  assert(code.len != 0);
+  return code;
+}
 // note(shahzad): this doesn't look good
-Ws_Context ws_context_init(opaque_ptr_t allocator_ctx) {
+Ws_Context ws_context_new(opaque_ptr_t allocator_ctx, Ws_Options *opts) {
   Ws_Context ctx = {
       .allocator_ctx = {.ctx = allocator_ctx},
+      .opts = *opts,
   };
   return ctx;
 }
 
-WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx, const char *host,
-                                      uint16_t port) {
+WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx) {
+  const char *host = ctx->opts.host;
+  const uint16_t port = ctx->opts.port;
+
   const int tcp_socket_fd = socket(AF_INET, SOCK_STREAM, 0);
   struct sockaddr_in addr = {.sin_family = AF_INET,
                              .sin_addr.s_addr = inet_addr(host),
                              .sin_port = htons(port)};
-  const int ret =
+  const int connect_status =
       connect(tcp_socket_fd, (struct sockaddr *)&addr, sizeof(addr));
-  if (ret == -1) {
+  if (connect_status == -1) {
     return WS_CONNECTION_FAILURE;
   }
   ctx->tcp_fd = tcp_socket_fd;
   return WS_SUCCESS;
 }
 
-WS_STATUS ws_send_http_upgdate_request(Ws_Context *ctx,
-                                       const BetterString_View *request) {
-  ssize_t ret = write(ctx->tcp_fd, request->view, request->len);
-  WS_LOG_DEBUG("sent http upgrade request, written %ld bytes\n", ret);
-  if (ret == -1) {
+WS_STATUS ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len) {
+  ssize_t bytes_wrote = write(ctx->tcp_fd, data, len);
+  WS_LOG_DEBUG("written %ld bytes out of %lu\n", bytes_wrote, len);
+  if (bytes_wrote == -1) {
     return WS_WRITE_FAILED;
   }
-  assert((size_t)ret == request->len);
+  assert((size_t)bytes_wrote == len);
   return WS_SUCCESS;
 }
 
@@ -136,18 +159,17 @@ static inline bool _verify_utf8(const char *data, size_t len) {
   return true;
 }
 // todo(shahzad): refactor this
-static ssize_t ws_read_tcp_data(Ws_Context *ctx, uint8_t *buff, size_t len) {
+static ssize_t ws_read_raw(Ws_Context *ctx, uint8_t *buff, size_t len) {
   ssize_t bytes_read = read(ctx->tcp_fd, buff, len);
   WS_LOG_DEBUG("WS_READ returned with %ld, STATUS: %s\n", bytes_read,
                strerror(errno));
   return bytes_read;
 }
 
-static bool ws_verify_websocket_sec_key(Ws_Context *ctx,
-                                        BetterString_View sec_key,
-                                        BetterString_View sec_accept) {
+static bool _ws_verify_websocket_sec_key(Ws_Context *ctx,
+                                         BetterString_View sec_key,
+                                         BetterString_View sec_accept) {
   // todo(shahzad)!: fix this please
-  printf("\n");
   BetterString_Builder sec_key_builder = bs_builder_new(ctx);
   ALLOCATOR_STATUS status = ALLOCATOR_SUCCESS;
   bs_builder_sprintf(status, &sec_key_builder, BSV_Fmt "%s", BSV_Arg(sec_key),
@@ -190,54 +212,84 @@ static bool ws_verify_websocket_sec_key(Ws_Context *ctx,
 
   return true;
 }
-void ws_do_http_upgrade(Ws_Context *ctx) {
-  BetterString_Builder upgrade_request = {0};
 
-  WS_LOG_WARN(
-      "should take the websocket path here ngl frfr or uri or smth idk man\n");
-
-  uint8_t sec_websocket_key[16] = {0};
+static inline void _ws_verify_sub_protocol(void) {
+  _LOG_WARN("TODO: unimplemented");
+}
+static inline _secWebsocketKey _generate_sec_websocket_key(void) {
+  _secWebsocketKey key = {0};
   xoroshiro128Ctx rng_ctx = xoroshiro128_init((size_t)time(NULL));
-  xoroshiro128_fill(&rng_ctx, sec_websocket_key, 16);
-  BetterString_ViewManaged sec_websocket_key_base64 = {.view = (char[64]){0},
-                                                       .len = 0};
-  BASE64_STATUS base64_status =
-      base64_encode(sec_websocket_key, 16, sec_websocket_key_base64.view, 64,
-                    &sec_websocket_key_base64.len,
-                    (base64EncodeSettings){.padding = BASE64_ENCODE_PADDING});
+  uint8_t random_key[16] = {0};
+  xoroshiro128_fill(&rng_ctx, random_key, 16);
+  BASE64_STATUS base64_status = base64_encode(
+      random_key, 16, key.data, SEC_WEBSOCKET_KEY_LEN, &(size_t){0},
+      (base64EncodeSettings){.padding = BASE64_ENCODE_PADDING});
   assert(base64_status == BASE64_STATUS_SUCCESS);
-  ALLOCATOR_STATUS builder_status = ALLOCATOR_SUCCESS;
-  WS_LOG_DEBUG("sec key original: \"" BSV_Fmt "\"\n",
-               BSV_Arg(sec_websocket_key_base64));
+  return key;
+}
+// todo(shahzad)!: add error shit here when upgrade fails
+void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
+                        size_t sec_websocket_key_len) {
+  BetterString_Builder upgrade_request = {0};
+  BetterString_View sec_websocket_key_view = {.view = sec_websocket_key,
+                                              .len = sec_websocket_key_len};
 
-  bs_builder_append_cstr(&upgrade_request, "GET / HTTP/1.1\r\n");
+  WS_LOG_DEBUG("sec key original: \"" BSV_Fmt "\"\n",
+               BSV_Arg(sec_websocket_key_view));
+
+  ALLOCATOR_STATUS builder_status = ALLOCATOR_SUCCESS;
+  bs_builder_sprintf(builder_status, &upgrade_request, "GET %s HTTP/1.1\r\n",
+                     ctx->opts.path);
+
   bs_builder_append_cstr(&upgrade_request, "Host: 127.0.0.1\r\n");
   bs_builder_append_cstr(&upgrade_request, "Upgrade: websocket\r\n");
   bs_builder_append_cstr(&upgrade_request, "Connection: Upgrade\r\n");
   bs_builder_sprintf(builder_status, &upgrade_request,
-                     "Sec-WebSocket-Key: %s\r\n",
-                     sec_websocket_key_base64.view);
+                     "Sec-WebSocket-Key: " BSV_Fmt "\r\n",
+                     BSV_Arg(sec_websocket_key_view));
   bs_builder_append_cstr(&upgrade_request, "Origin: http://127.0.0.1\r\n");
   bs_builder_append_cstr(&upgrade_request, "Sec-WebSocket-Protocol: chat\r\n");
   bs_builder_append_cstr(&upgrade_request, "Sec-WebSocket-Version: 13\r\n");
   bs_builder_append_cstr(&upgrade_request, "\r\n");
+  _LOG_TODO("add functionality to append custom headers provided by the "
+            "user\n");
 
   BetterString_View result_str = bs_builder_to_sv(&upgrade_request);
 
-  ws_send_http_upgdate_request(ctx, &result_str);
-
+  ws_write_raw(ctx, (const uint8_t *)result_str.view, result_str.len);
   bs_builder_destory(&upgrade_request);
+}
+WS_STATUS ws_connect(Ws_Context *ctx) {
+  if (ctx->opts.is_tls == true) {
+    WS_LOG_ERROR("We don't support secure websocket!");
+    return WS_CONNECTION_FAILURE;
+  }
+  const WS_STATUS tcp_connect_status = ws_establish_tcp_connection(ctx);
+  if (tcp_connect_status != WS_SUCCESS) {
+    return tcp_connect_status;
+  }
 
+  BetterString_View sec_websocket_key =
+      bs_from_string(_generate_sec_websocket_key().data, SEC_WEBSOCKET_KEY_LEN);
+
+  ws_do_http_upgrade(ctx, sec_websocket_key.view, sec_websocket_key.len);
+
+  // todo(shahzad)!: use allocator
   static uint8_t buffer[1024] = {0};
-
-  const ssize_t bytes_read = ws_read_tcp_data(ctx, buffer, 1024);
-  assert(bytes_read != -1);
-
+  const ssize_t bytes_read = ws_read_raw(ctx, buffer, 1024);
+  if (bytes_read == -1) {
+    return WS_CONNECTION_FAILURE;
+  }
   _verify_utf8((const char *)buffer, (size_t)bytes_read);
   BetterString_View read_data =
       bs_from_string((const char *)buffer, (size_t)bytes_read);
 
   _httpPayload payload = {0};
+  WS_LOG_DEBUG(
+      "got http response: ==================================\n" BSV_Fmt,
+      BSV_Arg(read_data));
+
+  WS_LOG_DEBUG("=====================================================\n");
   _http_parse_header(&payload, &read_data);
 
   if (read_data.len != 0) { // couldn't parse all of the header
@@ -245,9 +297,15 @@ void ws_do_http_upgrade(Ws_Context *ctx) {
     memmove(buffer, read_data.view, read_data.len);
     read_data.view = (const char *)buffer;
   }
+  const BetterString_View status_code = _http_status_code(&payload);
+  // todo(shahzad)!: this should be an integer
+  if (bs_eq(status_code, BSV("101")) == false) {
+    WS_LOG_DEBUG("wrong error code: expected %s got \"" BSV_Fmt "\"\n", "101",
+                 BSV_Arg(status_code));
+    return WS_FAILED;
+  }
   _httpHeader *response_sec_key =
       _http_payload_header_get(&payload, BSV("Sec-WebSocket-Accept"));
-  ws_verify_websocket_sec_key(ctx,
-                              *(BetterString_View *)&sec_websocket_key_base64,
-                              response_sec_key->value);
+  _ws_verify_websocket_sec_key(ctx, sec_websocket_key, response_sec_key->value);
+  _ws_verify_sub_protocol();
 }

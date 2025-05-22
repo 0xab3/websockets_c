@@ -18,7 +18,8 @@
 #define opaque_ptr_t void *
 #endif // opaque_ptr_t
 
-#define SEC_WEBSOCKET_KEY_LEN 16
+#define WEBSOCKET_OPTIONS_DEFAULT(_host) &(Ws_Options){.host = _host, .port = 80, .is_tls = false, .path = "/"}
+#define SEC_WEBSOCKET_KEY_LEN 24
 
 #define WS_LOG_DEBUG _LOG_DEBUG
 #define WS_LOG_WARN _LOG_WARN
@@ -39,28 +40,37 @@ typedef enum {
 } WS_STATUS;
 
 static const char *Ws_Error_Strs[] __attribute__((unused)) = {
-    "WS_SUCCESS", "WS_CONNECTION_FAILURE", "WS_WRITE_FAILED", "WS_FAILED"};
+    "WS_SUCCESS", "WS_CONNECTION_FAILURE","WS_WRITE_FAILED", "WS_FAILED"};
 
 _Static_assert(WS_STATUS_COUNT == ARRAY_LEN(Ws_Error_Strs),
                "forgor💀 to add enum variant to Ws_Error_Strs");
 
-
-typedef struct {
+typedef struct Ws_AllocatorCtx {
   opaque_ptr_t ctx;
 } Ws_AllocatorCtx;
 
+typedef struct Ws_Options {
+  const char *host;
+  const char *path; // null terminated
+  uint16_t port;
+  uint16_t is_tls; // cries in memory alignment
+}Ws_Options;
+
 typedef struct {
-  Ws_AllocatorCtx allocator_ctx; // mark(unused)
-  opaque_ptr_t data;
+  struct Ws_AllocatorCtx allocator_ctx; // mark(unused)
+  struct Ws_Options opts;
   int tcp_fd;
+  opaque_ptr_t data;
   char padding[4];
 } Ws_Context;
 
-Ws_Context ws_context_init(opaque_ptr_t allocator);
-WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx, const char *host,
-                                      uint16_t port) __attribute_nonnull__((1));
-WS_STATUS ws_send_http_upgdate_request(Ws_Context *ctx,
-                                       const BetterString_View *request);
-void ws_do_http_upgrade(Ws_Context *ctx);
+
+// i really don't wanna write a uri parser so user will have to 
+// rawdog the host and port 
+Ws_Context ws_context_new(opaque_ptr_t allocator,Ws_Options* opts);
+WS_STATUS ws_connect(Ws_Context *ctx);
+WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx) __attribute_nonnull__((1));
+WS_STATUS ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len);
+void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,size_t sec_websocket_key_len);
 
 #endif // __WEBSOCKET_H__
