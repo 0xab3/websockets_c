@@ -7,7 +7,13 @@
 #ifndef opaque_ptr_t
 #define opaque_ptr_t void *
 #endif // opaque_ptr_t
-       //
+
+#define _LOG_TODO(...)                                                        \
+  do {                                                                         \
+    fprintf(stderr, "TODO: %s(): ", __func__);                                \
+    fprintf(stderr, __VA_ARGS__);                                              \
+  } while (0)
+
 #define _LOG_DEBUG(...)                                                        \
   do {                                                                         \
     fprintf(stderr, "DEBUG: %s(): ", __func__);                                \
