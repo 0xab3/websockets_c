@@ -1,4 +1,7 @@
 #include "websocket.h"
+#ifdef __linux__
+#include "io/linux.h"
+#endif
 #include "libs/allocator.h"
 #include "libs/base64.h"
 #include "libs/dyn_array.h"
@@ -7,6 +10,7 @@
 #include "libs/utils.h"
 #include <stddef.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #ifndef BS_IMPLEMENTATION
 #define BS_IMPLEMENTATION
@@ -138,12 +142,18 @@ WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx) {
   if (connect_status == -1) {
     return WS_CONNECTION_FAILURE;
   }
-  ctx->tcp_fd = tcp_socket_fd;
+  ctx->io_tcp = io_init(tcp_socket_fd);
+  const int set_nonblock_result = io_set_nonblocking(&ctx->io_tcp);
+  if (set_nonblock_result == -1) {
+    WS_LOG_ERROR("failed to set socket fd to nonblocking!");
+    return WS_INTERNAL_FAILURE;
+  }
+
   return WS_SUCCESS;
 }
 
 WS_STATUS ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len) {
-  ssize_t bytes_wrote = write(ctx->tcp_fd, data, len);
+  ssize_t bytes_wrote = io_write_exact(&ctx->io_tcp, data, len);
   WS_LOG_DEBUG("written %ld bytes out of %lu\n", bytes_wrote, len);
   if (bytes_wrote == -1) {
     return WS_WRITE_FAILED;
@@ -160,7 +170,7 @@ static inline bool _verify_utf8(const char *data, size_t len) {
 }
 // todo(shahzad): refactor this
 static ssize_t ws_read_raw(Ws_Context *ctx, uint8_t *buff, size_t len) {
-  ssize_t bytes_read = read(ctx->tcp_fd, buff, len);
+  ssize_t bytes_read = io_read_with_timeout(&ctx->io_tcp, buff, len, 1);
   WS_LOG_DEBUG("WS_READ returned with %ld, STATUS: %s\n", bytes_read,
                strerror(errno));
   return bytes_read;
@@ -218,7 +228,7 @@ static inline void _ws_verify_sub_protocol(void) {
 }
 static inline _secWebsocketKey _generate_sec_websocket_key(void) {
   _secWebsocketKey key = {0};
-  xoroshiro128Ctx rng_ctx = xoroshiro128_init((size_t)time(NULL));
+  xoroshiro128Context rng_ctx = xoroshiro128_init((size_t)time(NULL));
   uint8_t random_key[16] = {0};
   xoroshiro128_fill(&rng_ctx, random_key, 16);
   BASE64_STATUS base64_status = base64_encode(
@@ -284,12 +294,12 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
   BetterString_View read_data =
       bs_from_string((const char *)buffer, (size_t)bytes_read);
 
-  _httpPayload payload = {0};
   WS_LOG_DEBUG(
       "got http response: ==================================\n" BSV_Fmt,
       BSV_Arg(read_data));
-
   WS_LOG_DEBUG("=====================================================\n");
+
+  _httpPayload payload = {0};
   _http_parse_header(&payload, &read_data);
 
   if (read_data.len != 0) { // couldn't parse all of the header
@@ -297,15 +307,17 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
     memmove(buffer, read_data.view, read_data.len);
     read_data.view = (const char *)buffer;
   }
-  const BetterString_View status_code = _http_status_code(&payload);
   // todo(shahzad)!: this should be an integer
+  const BetterString_View status_code = _http_status_code(&payload);
   if (bs_eq(status_code, BSV("101")) == false) {
     WS_LOG_DEBUG("wrong error code: expected %s got \"" BSV_Fmt "\"\n", "101",
                  BSV_Arg(status_code));
-    return WS_FAILED;
+    return WS_CONNECTION_FAILURE;
   }
   _httpHeader *response_sec_key =
       _http_payload_header_get(&payload, BSV("Sec-WebSocket-Accept"));
   _ws_verify_websocket_sec_key(ctx, sec_websocket_key, response_sec_key->value);
   _ws_verify_sub_protocol();
+
+  return WS_SUCCESS;
 }
