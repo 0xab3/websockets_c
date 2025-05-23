@@ -10,22 +10,22 @@
 #include <stdnoreturn.h>
 #include <string.h>
 
-typedef struct xoroshiro128Ctx {
+typedef struct xoroshiro128Context {
   uint64_t rnd[2];
-} xoroshiro128Ctx;
+} xoroshiro128Context;
 
-xoroshiro128Ctx xoroshiro128_init(uint64_t seed);
-uint64_t xoroshiro128_next(xoroshiro128Ctx *ctx);
-void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len);
+xoroshiro128Context xoroshiro128_init(uint64_t seed);
+uint64_t xoroshiro128_next(xoroshiro128Context *ctx);
+void xoroshiro128_fill(xoroshiro128Context *ctx, uint8_t *buffer, size_t len);
 uint64_t jump(void);
 
-xoroshiro128Ctx xoroshiro128_init(uint64_t seed) {
-  splitmix64Ctx splitmix64_ctx = splitmix64_init(seed);
+xoroshiro128Context xoroshiro128_init(uint64_t seed) {
+  splitmix64Context splitmix64_ctx = splitmix64_init(seed);
   const uint64_t s1 = splitmix64_next(&splitmix64_ctx);
   const uint64_t s2 = splitmix64_next(&splitmix64_ctx);
-  return (xoroshiro128Ctx){.rnd = {s1, s2}};
+  return (xoroshiro128Context){.rnd = {s1, s2}};
 }
-uint64_t xoroshiro128_next(xoroshiro128Ctx *ctx) {
+uint64_t xoroshiro128_next(xoroshiro128Context *ctx) {
   const uint64_t s0 = ctx->rnd[0];
   uint64_t s1 = ctx->rnd[1];
   const uint64_t result = s0 + s1;
@@ -43,7 +43,7 @@ uint64_t xoroshiro128_next(xoroshiro128Ctx *ctx) {
   return result;
 }
 
-void xoroshiro128_fill(xoroshiro128Ctx *ctx, uint8_t *buffer, size_t len) {
+void xoroshiro128_fill(xoroshiro128Context *ctx, uint8_t *buffer, size_t len) {
   // note(shahzad): fix the alignment issues
   uint64_t rnd_num = 0;
   const size_t aligned_len = len / 8;
