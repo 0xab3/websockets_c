@@ -1,69 +1,54 @@
 #include "linux.h"
+#include "./io_uring.h"
 #include "libs/utils.h"
 #include "unix_internal.c"
 #include <assert.h>
-#include <errno.h>
+#include <bits/types/sigset_t.h>
 #include <fcntl.h>
 #include <linux/io_uring.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
 #include <sys/poll.h>
-#include <unistd.h>
 
-struct io io_init(int fd) { return (struct io){.fd = fd}; }
-int io_set_nonblocking(struct io *io_ctx) {
-  return unix__enable_nonblocking_io(io_ctx->fd);
+// NOTE(shahzad)!!!: no async io rn
+struct io io_init(void) {
+  return (struct io){.uring = io_uring_init(&(struct io_uring_params){0})};
 }
-// note(shahzad): remove poll use io_uring
-ssize_t io_write_exact(struct io *io_ctx, const uint8_t *buff, size_t len) {
-  struct pollfd poll_fd[1] = {0};
-  poll_fd[0].fd = io_ctx->fd;
-  poll_fd[0].events = POLLOUT;
-
-  size_t total = 0;
-  while (total < len) {
-    int ready = poll(poll_fd, 1, -1);
-    if (ready == -1) {
-      return -1;
-    }
-
-    assert(poll_fd[0].revents & POLLOUT);
-    ssize_t wrote = write(io_ctx->fd, buff + total, len - total);
-    assert(wrote != -1);
-    total += (size_t)wrote;
-  }
-
-  return (ssize_t)total;
+int io_send_write_event(struct io *io_ctx, int fd, const uint8_t *buff,
+                        size_t len) {
+  _LOG_TODO("add userdata to identify events!!!!\n");
+  struct io_uring_sqe sqe = {.opcode = IORING_OP_WRITE,
+                             .fd = fd,
+                             .addr = (uint64_t)buff,
+                             .len = (uint32_t)len};
+  sq_submit(&io_ctx->uring.s_queue, sqe);
+  // this is blocking :skull:
+  return io_uring_enter(io_ctx->uring.ring_fd, 1, 1, IORING_ENTER_GETEVENTS,
+                        &sqe);
+}
+int io_send_read_event(struct io *io_ctx, int fd, uint8_t *buff, size_t size) {
+  struct io_uring_sqe sqe = {.opcode = IORING_OP_READ,
+                             .fd = fd,
+                             .addr = (uint64_t)buff,
+                             .len = (uint32_t)size};
+  sq_submit(&io_ctx->uring.s_queue, sqe);
+  return io_uring_enter(io_ctx->uring.ring_fd, 1, 1, IORING_ENTER_GETEVENTS,
+                        &sqe);
 }
 
-ssize_t io_read_with_timeout(struct io *io_ctx, uint8_t *buff, size_t size,
-                             int timeout) {
-  struct pollfd poll_fd[1] = {0};
-  poll_fd[0].fd = io_ctx->fd;
-  poll_fd[0].events = POLLIN;
-  ssize_t total = 0;
-  while ((size_t)total < size) {
-    int ready = poll(
-        poll_fd, 1,
-        timeout); // timeout will be a lot than 1 ik that (this is throw away)
-    if (ready == -1) {
-      return total == 0 ? -1 : total;
-    }
-    if (!(poll_fd[0].revents & POLLIN)) {
-      return total;
-    }
-    ssize_t read_bytes = read(io_ctx->fd, buff + total, size - (size_t)total);
-    if (read_bytes == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        _UNREACHABLE("we already polled this can't return EAGAIN");
-        continue;
-      }
-      return -1;
-    }
-
-    total += (size_t)read_bytes;
+// useless function
+ssize_t io_get_processed_event_result(struct io *io_ctx) {
+  struct io_uring_cqe *cqe = cq_pop(&io_ctx->uring.c_queue);
+  // this is bad
+  while (cqe == NULL) {
+    cqe = cq_pop(&io_ctx->uring.c_queue);
   }
-
-  return total;
+  assert(cqe != NULL);
+  ssize_t bytes_processed = cqe->res;
+  if (bytes_processed < 0) {
+    _LOG_DEBUG("read/write failed with %s\n", strerror((int)-bytes_processed));
+  }
+  return bytes_processed;
 }
