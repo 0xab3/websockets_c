@@ -63,7 +63,8 @@ typedef struct Ws_Options {
 typedef struct {
   struct Ws_AllocatorContext allocator_ctx; // mark(unused)
   struct Ws_Options opts;
-  struct io io_tcp;
+  int tcp_fd;
+  struct io io_ctx;
   opaque_ptr_t data;
   char padding[4];
 } Ws_Context;

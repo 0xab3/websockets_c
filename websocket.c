@@ -1,4 +1,5 @@
 #include "websocket.h"
+#include "io/io_uring.h"
 #ifdef __linux__
 #include "io/linux.h"
 #endif
@@ -142,18 +143,17 @@ WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx) {
   if (connect_status == -1) {
     return WS_CONNECTION_FAILURE;
   }
-  ctx->io_tcp = io_init(tcp_socket_fd);
-  const int set_nonblock_result = io_set_nonblocking(&ctx->io_tcp);
-  if (set_nonblock_result == -1) {
-    WS_LOG_ERROR("failed to set socket fd to nonblocking!");
-    return WS_INTERNAL_FAILURE;
-  }
-
+  ctx->tcp_fd = tcp_socket_fd;
+  ctx->io_ctx = io_init();
   return WS_SUCCESS;
 }
 
 WS_STATUS ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len) {
-  ssize_t bytes_wrote = io_write_exact(&ctx->io_tcp, data, len);
+  int events_processed =
+      io_send_write_event(&ctx->io_ctx, ctx->tcp_fd, data, len);
+  assert(events_processed == 1);
+  const ssize_t bytes_wrote = io_get_processed_event_result(&ctx->io_ctx);
+
   WS_LOG_DEBUG("written %ld bytes out of %lu\n", bytes_wrote, len);
   if (bytes_wrote == -1) {
     return WS_WRITE_FAILED;
@@ -170,7 +170,10 @@ static inline bool _verify_utf8(const char *data, size_t len) {
 }
 // todo(shahzad): refactor this
 static ssize_t ws_read_raw(Ws_Context *ctx, uint8_t *buff, size_t len) {
-  ssize_t bytes_read = io_read_with_timeout(&ctx->io_tcp, buff, len, 1);
+  int events_processed =
+      io_send_read_event(&ctx->io_ctx, ctx->tcp_fd, buff, len);
+  assert(events_processed == 1);
+  const ssize_t bytes_read = io_get_processed_event_result(&ctx->io_ctx);
   WS_LOG_DEBUG("WS_READ returned with %ld, STATUS: %s\n", bytes_read,
                strerror(errno));
   return bytes_read;
@@ -266,8 +269,9 @@ void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
 
   BetterString_View result_str = bs_builder_to_sv(&upgrade_request);
 
+  // todo(shahzad)!!!!!!!!!!!!!!: handle memory management with io_uring
   ws_write_raw(ctx, (const uint8_t *)result_str.view, result_str.len);
-  bs_builder_destory(&upgrade_request);
+  // bs_builder_destory(&upgrade_request);
 }
 WS_STATUS ws_connect(Ws_Context *ctx) {
   if (ctx->opts.is_tls == true) {
