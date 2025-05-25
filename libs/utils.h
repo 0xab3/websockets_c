@@ -4,6 +4,10 @@
 #include <assert.h>
 #include <stdio.h>
 
+#ifndef internal 
+#define internal static inline
+#endif // internal
+
 #ifndef opaque_ptr_t
 #define opaque_ptr_t void *
 #endif // opaque_ptr_t
