@@ -188,8 +188,7 @@ static bool _ws_verify_websocket_sec_key(Ws_Context *ctx,
   bs_builder_sprintf(status, &sec_key_builder, BSV_Fmt "%s", BSV_Arg(sec_key),
                      "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
   assert(status == ALLOCATOR_SUCCESS);
-  sha1Digest digest = sha1_digest(ctx->allocator_ctx.ctx,
-                                  (const uint8_t *)sec_key_builder.string.data,
+  sha1Digest digest = sha1_digest((const uint8_t *)sec_key_builder.string.data,
                                   sec_key_builder.string.len);
 
   assert(memcmp(digest._As.u32, (uint32_t[5]){0}, 5) != 0);
