@@ -7,4 +7,5 @@ else
   error('only linux supported for now')
 endif
 executable('base64test','./tests/base64_test.c', './libs/base64.c')
+executable('sha1test','./tests/test_sha1_hash.c')
 executable('websocket-impl','main.c', link_with:lib)
