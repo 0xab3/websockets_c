@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <unistd.h>
 typedef struct io {
-  ioUring uring;
+  struct ioUring uring;
 } io;
 struct io io_init(void);
 int io_send_write_event(struct io *io_ctx, int fd, const uint8_t *buff,

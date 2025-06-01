@@ -94,25 +94,16 @@ BSDEF ALLOCATOR_STATUS bs_builder_append_sv(BetterString_Builder *builder,
                                             BetterString_View string);
 BSDEF ALLOCATOR_STATUS bs_builder_append_cstr(BetterString_Builder *builder,
                                               const char *cstr);
+// both of these functions return -ALLOCATOR_ERROR when allocator fucks up
+static inline ssize_t bs_builder_sprintf(BetterString_Builder *builder,
+                                         const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+static inline ssize_t bs_builder_vsprintf(BetterString_Builder *builder,
+                                          const char *fmt, va_list args)
+    __attribute__((format(printf, 2, 0)));
 #endif // __BS_H__
 
 #ifdef BS_IMPLEMENTATION
-
-#define bs_builder_sprintf(error, builder, fmt, ...)                           \
-  do {                                                                         \
-    int formatted_len = snprintf(NULL, 0, fmt, __VA_ARGS__);                   \
-    if ((*builder).string.capacity <                                           \
-        (*builder).string.len + (size_t)formatted_len) {                       \
-      error = bs_builder_reserve(builder, (*builder).string.len +              \
-                                              (size_t)formatted_len);          \
-      if (error != ALLOCATOR_SUCCESS) {                                        \
-        assert(error == ALLOCATOR_OUT_OF_MEMORY);                              \
-        break;                                                                 \
-      }                                                                        \
-    }                                                                          \
-    sprintf((*builder).string.data + (*builder).string.len, fmt, __VA_ARGS__); \
-    (*builder).string.len += (size_t)formatted_len;                            \
-  } while (0)
 
 BSDEF BetterString_View bs_from_string(const char *data, size_t len) {
   return (BetterString_View){.view = data, .len = len};
@@ -429,6 +420,41 @@ BSDEF ALLOCATOR_STATUS bs_builder_append_cstr(BetterString_Builder *builder,
                                               const char *cstr) {
   return bs_builder_append_sv(
       builder, (BetterString_View){.view = cstr, .len = strlen(cstr)});
+}
+static inline ssize_t __attribute__((format(printf, 2, 0)))
+bs_builder_vsprintf(BetterString_Builder *builder, const char *fmt,
+                    va_list args) {
+  ALLOCATOR_STATUS status = ALLOCATOR_SUCCESS;
+  va_list args_copy1;
+  va_copy(args_copy1, args);
+  int formatted_len = vsnprintf(NULL, 0, fmt, args_copy1);
+  va_end(args_copy1);
+  if ((*builder).string.capacity <
+      (*builder).string.len + (size_t)formatted_len) {
+    status = bs_builder_reserve(builder,
+                                (*builder).string.len + (size_t)formatted_len);
+    if (status != ALLOCATOR_SUCCESS) {
+      assert(status == ALLOCATOR_OUT_OF_MEMORY);
+      return -(ssize_t)
+          ALLOCATOR_OUT_OF_MEMORY; // belive it or not sprintf can't return -1
+    }
+  }
+  va_list args_copy2;
+  va_copy(args_copy2, args);
+  const ssize_t bytes_wrote =
+      vsnprintf((*builder).string.data + (*builder).string.len,
+                (*builder).string.capacity - (*builder).string.len, fmt, args_copy2);
+  va_end(args_copy2);
+  (*builder).string.len += (size_t)formatted_len;
+  return bytes_wrote;
+}
+static inline __attribute__((format(printf, 2, 3))) ssize_t
+bs_builder_sprintf(BetterString_Builder *builder, const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  ssize_t ret = bs_builder_vsprintf(builder, fmt, args);
+  va_end(args);
+  return ret;
 }
 
 #endif // BS_IMPLEMENTATION

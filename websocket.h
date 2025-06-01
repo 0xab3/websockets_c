@@ -58,14 +58,15 @@ typedef struct Ws_Options {
   const char *path; // null terminated
   uint16_t port;
   uint16_t is_tls; // cries in memory alignment
+  char padding[4];
 } Ws_Options;
 
-typedef struct {
+typedef struct Ws_Context {
   struct Ws_AllocatorContext allocator_ctx; // mark(unused)
   struct Ws_Options opts;
-  int tcp_fd;
   struct io io_ctx;
   opaque_ptr_t data;
+  int tcp_fd;
   char padding[4];
 } Ws_Context;
 
