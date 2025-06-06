@@ -8,6 +8,14 @@
 typedef struct io {
   struct ioUring uring;
 } io;
+
+typedef int(io_write_cb)(uint8_t *buffer, size_t buffer_len);
+typedef int(io_read_cb)(uint8_t *buffer, size_t buffer_len);
+
+typedef struct Completion {
+  void *completion_cb;
+  struct io_uring_cqe *completion;
+} Completion;
 struct io io_init(void);
 int io_send_write_event(struct io *io_ctx, int fd, const uint8_t *buff,
                         size_t len);

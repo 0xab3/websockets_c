@@ -8,6 +8,7 @@
 #include <linux/io_uring.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
@@ -18,8 +19,9 @@ struct io io_init(void) {
 }
 int io_send_write_event(struct io *io_ctx, int fd, const uint8_t *buff,
                         size_t len) {
-  _LOG_TODO("add userdata to identify events!!!!\n");
-  struct io_uring_sqe sqe = {.opcode = IORING_OP_WRITE,
+  _LOG_TODO("add userdata to identify events!!!!");
+  struct io_uring_sqe sqe = {.user_data = (uint64_t)"write",
+                             .opcode = IORING_OP_WRITE,
                              .fd = fd,
                              .addr = (uint64_t)buff,
                              .len = (uint32_t)len};
@@ -29,7 +31,8 @@ int io_send_write_event(struct io *io_ctx, int fd, const uint8_t *buff,
                         &sqe);
 }
 int io_send_read_event(struct io *io_ctx, int fd, uint8_t *buff, size_t size) {
-  struct io_uring_sqe sqe = {.opcode = IORING_OP_READ,
+  struct io_uring_sqe sqe = {.user_data = (uint64_t)"read",
+                             .opcode = IORING_OP_READ,
                              .fd = fd,
                              .addr = (uint64_t)buff,
                              .len = (uint32_t)size};
@@ -48,7 +51,7 @@ ssize_t io_get_processed_event_result(struct io *io_ctx) {
   assert(cqe != NULL);
   ssize_t bytes_processed = cqe->res;
   if (bytes_processed < 0) {
-    _LOG_DEBUG("read/write failed with %s\n", strerror((int)-bytes_processed));
+    _LOG_DEBUG("read/write failed with %s", strerror((int)-bytes_processed));
   }
   return bytes_processed;
 }

@@ -53,9 +53,7 @@ BASE64_STATUS base64_encode(const uint8_t *__restrict buffer, size_t len,
     _base64_value_for_data(output_quad, 3, output_buffer + output_buffer_idx);
     output_buffer_idx += 3;
     break;
-  default:
-    _LOG_DEBUG("remaining bytes: %lu\n", remaining_bytes);
-    _UNREACHABLE();
+  default: _LOG_DEBUG("remaining bytes: %lu", remaining_bytes); _UNREACHABLE();
   }
   assert(output_buffer_idx < output_len);
 
@@ -127,9 +125,7 @@ BASE64_STATUS base64_decode(const char *__restrict buffer, size_t len,
 
     output_buffer_idx += 3;
     break;
-  default:
-    _LOG_DEBUG("remaining bytes: %lu\n", remaining_bytes);
-    _UNREACHABLE();
+  default: _LOG_DEBUG("remaining bytes: %lu", remaining_bytes); _UNREACHABLE();
   }
   assert(output_buffer_idx < output_len);
   output_buffer[output_buffer_idx + 1] = 0;

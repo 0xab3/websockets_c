@@ -4,7 +4,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#ifndef internal 
+#ifndef internal
 #define internal static inline
 #endif // internal
 
@@ -12,27 +12,31 @@
 #define opaque_ptr_t void *
 #endif // opaque_ptr_t
 
-#define _LOG_TODO(...)                                                        \
+#define _LOG_TODO(...)                                                         \
   do {                                                                         \
-    fprintf(stderr, "TODO: %s(): ", __func__);                                \
+    fprintf(stderr, "TODO: %s(): ", __func__);                                 \
     fprintf(stderr, __VA_ARGS__);                                              \
+    fprintf(stderr, "\n");                                                     \
   } while (0)
 
 #define _LOG_DEBUG(...)                                                        \
   do {                                                                         \
     fprintf(stderr, "DEBUG: %s(): ", __func__);                                \
     fprintf(stderr, __VA_ARGS__);                                              \
+    fprintf(stderr, "\n");                                                     \
   } while (0)
 
 #define _LOG_WARN(...)                                                         \
   do {                                                                         \
     fprintf(stderr, "WARN: %s(): ", __func__);                                 \
     fprintf(stderr, __VA_ARGS__);                                              \
+    fprintf(stderr, "\n");                                                     \
   } while (0)
 #define _LOG_ERROR(...)                                                        \
   do {                                                                         \
     fprintf(stderr, "ERROR: %s(): ", __func__);                                \
     fprintf(stderr, __VA_ARGS__);                                              \
+    fprintf(stderr, "\n");                                                     \
   } while (0)
 
 #define _UNREACHABLE(...) assert(0 && "UNREACHABLE: "__VA_ARGS__)
