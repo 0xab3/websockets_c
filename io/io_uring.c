@@ -56,6 +56,13 @@ ioUring io_uring_init(struct io_uring_params *params) {
 }
 
 struct io_uring_cqe *cq_pop(struct completionQueue *c_queue) {
+  struct io_uring_cqe *cqe = cq_pop_try(c_queue);
+  while (cqe == NULL) {
+    cqe = cq_pop_try(c_queue);
+  }
+  return cqe;
+}
+struct io_uring_cqe *cq_pop_try(struct completionQueue *c_queue) {
   struct io_uring_cqe *cqe;
   uint32_t head;
   head = __atomic_load_n((uint32_t *)c_queue->head, __ATOMIC_ACQUIRE);
@@ -67,6 +74,9 @@ struct io_uring_cqe *cq_pop(struct completionQueue *c_queue) {
   head++;
   __atomic_store_n(c_queue->head, head, __ATOMIC_RELEASE);
   return cqe;
+}
+struct io_uring_cqe cqe_clone(struct io_uring_cqe *cqe){
+  return *cqe;
 }
 void sq_submit(struct submissionQueue *s_queue, struct io_uring_sqe sqe) {
   uint32_t tail = __atomic_load_n((uint32_t *)s_queue->tail, __ATOMIC_ACQUIRE);

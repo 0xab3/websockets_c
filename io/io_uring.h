@@ -12,17 +12,17 @@
 typedef struct submissionQueue {
   uint32_t *tail;
   uint32_t *array;
-  atomic_size_t n_submissions; 
   struct io_uring_sqe *sqes;
   uint32_t *mask;
 } submissionQueue;
+
 typedef struct completionQueue {
   uint32_t *head;
   uint32_t *tail;
-  atomic_size_t n_completions;
   struct io_uring_cqe *cqes;
   uint32_t *mask;
 } completionQueue;
+
 typedef struct ioUring {
   int ring_fd;
   char padding[4];
@@ -30,8 +30,11 @@ typedef struct ioUring {
   completionQueue c_queue;
 } ioUring;
 
+
 ioUring io_uring_init(struct io_uring_params *params);
 struct io_uring_cqe *cq_pop(struct completionQueue *c_queue);
+struct io_uring_cqe *cq_pop_try(struct completionQueue *c_queue) ;
+struct io_uring_cqe cqe_clone(struct io_uring_cqe *cqe);
 void sq_submit(struct submissionQueue *s_queue, struct io_uring_sqe sqe);
 
 int io_uring_setup(uint16_t entries, struct io_uring_params *p);
