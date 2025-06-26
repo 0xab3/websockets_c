@@ -12,8 +12,8 @@
 #define opaque_ptr_t void *
 #endif // opaque_ptr_t
 
-#define da_type_new(T)                                                         \
-  {                                                                            \
+#define DA_TYPE_NEW(T)                                                         \
+  struct {                                                                     \
     opaque_ptr_t allocator_ctx;                                                \
     T *items;                                                                  \
     size_t len;                                                                \
@@ -32,25 +32,18 @@
 #define da_append(xs, x, __result_ptr)                                         \
   do {                                                                         \
     __result_ptr = NULL;                                                       \
-    void *tmp_realloc = NULL;                                                  \
     if ((xs).len >= (xs).capacity) {                                           \
-      if ((xs).capacity == 0)                                                  \
-        (xs).capacity = 8;                                                     \
-      else                                                                     \
-        (xs).capacity *= 2;                                                    \
-      tmp_realloc = DA_REALLOC((xs).allocator_ctx, (xs).items,                 \
-                               (xs).capacity * (sizeof(*(xs).items)));         \
-      if (tmp_realloc != NULL) {                                               \
-        /* NOTE: this brakes cpp compatibility, but if you use cpp then don't  \
-         * use this library*/                                                  \
-        __result_ptr = tmp_realloc;                                            \
-        (xs).items = tmp_realloc;                                              \
+      (xs).capacity = (xs).capacity == 0 ? 8 : (xs).capacity * 2;              \
+                                                                               \
+      void *tmp_realloc = DA_REALLOC((xs).allocator_ctx, (xs).items,           \
+                                     (xs).capacity * (sizeof(*(xs).items)));   \
+      if (tmp_realloc == NULL) {                                               \
+        break;                                                                 \
       }                                                                        \
+      (xs).items = tmp_realloc;                                                \
     }                                                                          \
-    if (__result_ptr == tmp_realloc) {                                         \
-      (xs).items[(xs).len++] = x;                                              \
-      __result_ptr = (xs).items + (xs).len;                                    \
-    }                                                                          \
+    (xs).items[(xs).len++] = x;                                                \
+    __result_ptr = (xs).items + (xs).len - 1;                                  \
   } while (0);
 
 #define da_remove_swap(xs, index)                                              \
