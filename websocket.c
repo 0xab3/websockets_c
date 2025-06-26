@@ -1,12 +1,12 @@
 #include "websocket.h"
-#include "io/io_uring.h"
+#include "libs/extint.h"
 #ifdef __linux__
 #include "io/linux.h"
 #endif
 #include "libs/allocator.h"
 #include "libs/base64.h"
 #include "libs/dyn_array.h"
-#include "libs/rng_xoroshiro.h"
+#include "libs/rng_xoroshiro.c"
 #include "libs/sha1.h"
 #include "libs/utils.h"
 #include <stddef.h>

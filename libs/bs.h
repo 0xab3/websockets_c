@@ -311,7 +311,7 @@ static inline BSDEF ssize_t bs_escape_wid_writer(
       ssize_t bytes_written =
           writer(bs_from_string(escaped, escaped_idx), userdata);
       if (bytes_written != (ssize_t)escaped_idx) {
-        _LOG_ERROR("writter failed at index: %lu\n", escaped_idx);
+        _LOG_ERROR("writter failed at index: %lu", escaped_idx);
         return bytes_written;
       }
     }

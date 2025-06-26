@@ -1,6 +1,6 @@
 #ifndef __XOROSHIRO128P_H__
 #define __XOROSHIRO128P_H__
-#include "./rng_splitmix64.h"
+#include "./rng_splitmix64.c"
 #include "libs/utils.h"
 #include "websocket.h"
 #include <assert.h>
