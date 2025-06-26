@@ -24,6 +24,7 @@
 #define WEBSOCKET_OPTIONS_DEFAULT(_host)                                       \
   &(Ws_Options){.host = _host, .port = 80, .is_tls = false, .path = "/"}
 #define SEC_WEBSOCKET_KEY_LEN 24
+#define WS_MAX_HEADER_LENGTH 14
 
 #define WS_LOG_DEBUG _LOG_DEBUG
 #define WS_LOG_WARN _LOG_WARN
@@ -70,6 +71,17 @@ typedef struct Ws_Context {
   char padding[4];
 } Ws_Context;
 
+typedef struct __attribute__((packed)) Ws_FrameHeader {
+  bool fin : 1;
+  uint8_t rsv1 : 1;
+  uint8_t rsv2 : 1;
+  uint8_t rsv3 : 1;
+  uint8_t opcode : 4;
+  uint64_t payload_len;
+  uint32_t masking_key;
+  uint8_t *payload_data;
+} Ws_FrameHeader;
+
 typedef void(Ws_Handler)(const char *data, size_t len, opaque_ptr_t userdata);
 
 // i really don't wanna write a uri parser so user will have to
@@ -78,9 +90,9 @@ Ws_Context ws_context_new(opaque_ptr_t allocator, Ws_Options *opts);
 WS_STATUS ws_connect(Ws_Context *ctx);
 WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx)
     __attribute_nonnull__((1));
-WS_STATUS ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len);
+ssize_t ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len);
 void ws_on(const char *event, Ws_Handler *handler);
 void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
                         size_t sec_websocket_key_len);
-
+WS_STATUS ws_run_loop(Ws_Context *ctx);
 #endif // __WEBSOCKET_H__

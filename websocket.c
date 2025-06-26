@@ -43,6 +43,66 @@ typedef struct _secWebsocketKey {
   char data[SEC_WEBSOCKET_KEY_LEN];
 } _secWebsocketKey;
 
+internal void _print_ws_as_hex(uint8_t *data, size_t len) {
+  printf("==============================\n");
+  for (size_t i = 0; i < len; i++) {
+    printf("%x ", data[i]);
+  }
+  printf("==============================\n");
+}
+internal void _print_ws_frame(const Ws_FrameHeader *frame) {
+  printf("Ws_Frame {\n");
+  printf("  fin: %u\n", frame->fin);
+  printf("  rsv1: %u\n", frame->rsv1);
+  printf("  rsv2: %u\n", frame->rsv2);
+  printf("  rsv3: %u\n", frame->rsv3);
+  printf("  opcode: %u\n", frame->opcode);
+  printf("  mask: %u\n", frame->masking_key);
+  printf("  payload_len: %lu\n", frame->payload_len);
+  BetterString_View svd = bs_escape(
+      bs_from_string((char *)frame->payload_data, frame->payload_len));
+  printf("  payload_data: \"%.*s\"\n", BSV_Arg(svd));
+  printf("}\n");
+}
+
+internal Ws_FrameHeader websocket_buffer_to_frame_header(uint8_t *buffer,
+                                                         size_t len) {
+  size_t buffer_idx = 0;
+  const uint8_t fin = buffer[buffer_idx] >> 7;
+  const uint8_t rsv1 = (buffer[buffer_idx] >> 6) & 0x1;
+  const uint8_t rsv2 = (buffer[buffer_idx] >> 5) & 0x1;
+  const uint8_t rsv3 = (buffer[buffer_idx] >> 4) & 0x1;
+  const uint8_t opcode = buffer[buffer_idx] & 0xf;
+  buffer_idx++;
+  const uint8_t mask = buffer[buffer_idx] >> 7;
+  uint32_t masking_key = 0;
+  uint64_t payload_len = buffer[buffer_idx] & 0x7f;
+  buffer_idx++;
+  if (payload_len == 126) {
+    payload_len = to_le16(*(uint16_t *)(buffer + buffer_idx));
+    buffer_idx += 2;
+
+  } else if (payload_len == 127) {
+    payload_len = to_le64(*(uint64_t *)(buffer + buffer_idx));
+    buffer_idx += 8;
+  }
+  if (mask == 1) {
+    masking_key = to_le32(*(uint32_t *)(buffer + buffer_idx));
+    buffer_idx += 4;
+  }
+  Ws_FrameHeader header = (Ws_FrameHeader){
+      .fin = fin,
+      .rsv1 = rsv1,
+      .rsv2 = rsv2,
+      .rsv3 = rsv3,
+      .opcode = opcode,
+      .payload_len = payload_len,
+      .masking_key = masking_key,
+      .payload_data = buffer + buffer_idx,
+  };
+  return header;
+}
+
 static _httpHeader *_http_payload_header_get(_httpPayload *payload,
                                              BetterString_View key) {
   // i know hash map exists
@@ -74,7 +134,7 @@ static inline ALLOCATOR_STATUS _http_parse_header(_httpPayload *payload,
     if (payload->http_line.view == NULL) {
       return ALLOCATOR_OUT_OF_MEMORY;
     }
-    _LOG_DEBUG("http line: " BSV_Fmt "\n", BSV_Arg(http_line));
+    _LOG_DEBUG("http line: " BSV_Fmt, BSV_Arg(http_line));
   }
   while (request->len > 0) {
     BetterString_View http_header =
@@ -101,9 +161,9 @@ static inline ALLOCATOR_STATUS _http_parse_header(_httpPayload *payload,
     _http_payload_append_header(
         payload, (_httpHeader){.key = bs_builder_to_sv(&owned_key),
                                .value = bs_builder_to_sv(&owned_value)});
-    _LOG_DEBUG("key: \"" BSV_Fmt "\"\n", BSV_Arg(key));
-    _LOG_DEBUG("value: \"" BSV_Fmt "\"\n", BSV_Arg(value));
-    _LOG_DEBUG("\n");
+    _LOG_DEBUG("key: \"" BSV_Fmt "\"", BSV_Arg(key));
+    _LOG_DEBUG("value: \"" BSV_Fmt "\"", BSV_Arg(value));
+    _LOG_DEBUG("");
   }
   return ALLOCATOR_SUCCESS;
 }
@@ -148,33 +208,35 @@ WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx) {
   return WS_SUCCESS;
 }
 
-WS_STATUS ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len) {
-  int events_processed =
-      io_send_write_event(&ctx->io_ctx, ctx->tcp_fd, data, len);
-  assert(events_processed == 1);
-  const ssize_t bytes_wrote = io_get_processed_event_result(&ctx->io_ctx);
+ssize_t ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len) {
+  Promise promise = io_async_write(&ctx->io_ctx, ctx->tcp_fd, data, len);
+  while (io_promise_poll(&ctx->io_ctx, &promise) != PROMISE_COMPLETED)
+    ;
+  assert(promise.status == PROMISE_COMPLETED);
+  struct io_uring_cqe *cqe =
+      (struct io_uring_cqe *)(uintptr_t)io_promise_result(&promise);
+  const ssize_t bytes_wrote = cqe->res;
 
-  WS_LOG_DEBUG("written %ld bytes out of %lu\n", bytes_wrote, len);
-  if (bytes_wrote == -1) {
-    return WS_WRITE_FAILED;
-  }
-  assert((size_t)bytes_wrote == len);
-  return WS_SUCCESS;
+  WS_LOG_DEBUG("written %ld bytes out of %lu", bytes_wrote, len);
+  return bytes_wrote;
 }
 
 static inline bool _verify_utf8(const char *data, size_t len) {
   _UNUSED(data);
   _UNUSED(len);
-  _LOG_WARN("unimplemented!\n");
+  _LOG_WARN("unimplemented!");
   return true;
 }
 // todo(shahzad): refactor this
 static ssize_t ws_read_raw(Ws_Context *ctx, uint8_t *buff, size_t len) {
-  int events_processed =
-      io_send_read_event(&ctx->io_ctx, ctx->tcp_fd, buff, len);
-  assert(events_processed == 1);
-  const ssize_t bytes_read = io_get_processed_event_result(&ctx->io_ctx);
-  WS_LOG_DEBUG("WS_READ returned with %ld, STATUS: %s\n", bytes_read,
+  Promise promise = io_async_read(&ctx->io_ctx, ctx->tcp_fd, buff, len);
+  while (io_promise_poll(&ctx->io_ctx, &promise) != PROMISE_COMPLETED)
+    ;
+  assert(promise.status == PROMISE_COMPLETED);
+  struct io_uring_cqe *cqe =
+      (struct io_uring_cqe *)(uintptr_t)io_promise_result(&promise);
+  const ssize_t bytes_read = cqe->res;
+  WS_LOG_DEBUG("WS_READ returned with %ld, STATUS: %s", bytes_read,
                strerror(errno));
   return bytes_read;
 }
@@ -184,10 +246,17 @@ static bool _ws_verify_websocket_sec_key(Ws_Context *ctx,
                                          BetterString_View sec_accept) {
   // todo(shahzad)!: fix this please
   BetterString_Builder sec_key_builder = bs_builder_new(ctx);
-  ALLOCATOR_STATUS status = ALLOCATOR_SUCCESS;
-  bs_builder_sprintf(status, &sec_key_builder, BSV_Fmt "%s", BSV_Arg(sec_key),
-                     "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-  assert(status == ALLOCATOR_SUCCESS);
+  ssize_t bytes_wrote =
+      bs_builder_sprintf(&sec_key_builder, BSV_Fmt "%s", BSV_Arg(sec_key),
+                         "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+
+  if (bytes_wrote < 0) {
+    if (bytes_wrote == -ALLOCATOR_OUT_OF_MEMORY) {
+      _TODO("fix allocator");
+    }
+    _UNREACHABLE();
+  }
+
   sha1Digest digest = sha1_digest((const uint8_t *)sec_key_builder.string.data,
                                   sec_key_builder.string.len);
 
@@ -218,8 +287,8 @@ static bool _ws_verify_websocket_sec_key(Ws_Context *ctx,
                 (base64EncodeSettings){.padding = BASE64_ENCODE_PADDING});
   const BetterString_View base64_digest_sv =
       bs_builder_to_sv(&base64_digest_builder);
-  WS_LOG_DEBUG("sec_key: \"" BSV_Fmt "\"\n", BSV_Arg(base64_digest_sv));
-  WS_LOG_DEBUG("sec_sec_accept: \"" BSV_Fmt "\"\n", BSV_Arg(sec_accept));
+  WS_LOG_DEBUG("sec_key: \"" BSV_Fmt "\"", BSV_Arg(base64_digest_sv));
+  WS_LOG_DEBUG("sec_sec_accept: \"" BSV_Fmt "\"", BSV_Arg(sec_accept));
   assert(bs_eq(base64_digest_sv, sec_accept));
 
   return true;
@@ -246,30 +315,36 @@ void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
   BetterString_View sec_websocket_key_view = {.view = sec_websocket_key,
                                               .len = sec_websocket_key_len};
 
-  WS_LOG_DEBUG("sec key original: \"" BSV_Fmt "\"\n",
+  WS_LOG_DEBUG("sec key original: \"" BSV_Fmt "\"",
                BSV_Arg(sec_websocket_key_view));
 
-  ALLOCATOR_STATUS builder_status = ALLOCATOR_SUCCESS;
-  bs_builder_sprintf(builder_status, &upgrade_request, "GET %s HTTP/1.1\r\n",
-                     ctx->opts.path);
+  ssize_t bytes_wrote = bs_builder_sprintf(
+      &upgrade_request, "GET %s HTTP/1.1\r\n", ctx->opts.path);
+  assert(bytes_wrote > 0);
 
   bs_builder_append_cstr(&upgrade_request, "Host: 127.0.0.1\r\n");
   bs_builder_append_cstr(&upgrade_request, "Upgrade: websocket\r\n");
   bs_builder_append_cstr(&upgrade_request, "Connection: Upgrade\r\n");
-  bs_builder_sprintf(builder_status, &upgrade_request,
-                     "Sec-WebSocket-Key: " BSV_Fmt "\r\n",
-                     BSV_Arg(sec_websocket_key_view));
+  bytes_wrote =
+      bs_builder_sprintf(&upgrade_request, "Sec-WebSocket-Key: " BSV_Fmt "\r\n",
+                         BSV_Arg(sec_websocket_key_view));
+  assert(bytes_wrote > 0);
   bs_builder_append_cstr(&upgrade_request, "Origin: http://127.0.0.1\r\n");
   bs_builder_append_cstr(&upgrade_request, "Sec-WebSocket-Protocol: chat\r\n");
   bs_builder_append_cstr(&upgrade_request, "Sec-WebSocket-Version: 13\r\n");
   bs_builder_append_cstr(&upgrade_request, "\r\n");
   _LOG_TODO("add functionality to append custom headers provided by the "
-            "user\n");
+            "user");
 
   BetterString_View result_str = bs_builder_to_sv(&upgrade_request);
+  _LOG_DEBUG("==============================");
+  _LOG_DEBUG(BSV_Fmt, BSV_Arg(result_str));
+  _LOG_DEBUG("==============================");
 
   // todo(shahzad)!!!!!!!!!!!!!!: handle memory management with io_uring
-  ws_write_raw(ctx, (const uint8_t *)result_str.view, result_str.len);
+  bytes_wrote =
+      ws_write_raw(ctx, (const uint8_t *)result_str.view, result_str.len);
+  assert((size_t)bytes_wrote == result_str.len);
   // bs_builder_destory(&upgrade_request);
 }
 WS_STATUS ws_connect(Ws_Context *ctx) {
@@ -300,7 +375,7 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
   WS_LOG_DEBUG(
       "got http response: ==================================\n" BSV_Fmt,
       BSV_Arg(read_data));
-  WS_LOG_DEBUG("=====================================================\n");
+  WS_LOG_DEBUG("=====================================================");
 
   _httpPayload payload = {0};
   _http_parse_header(&payload, &read_data);
@@ -313,7 +388,7 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
   // todo(shahzad)!: this should be an integer
   const BetterString_View status_code = _http_status_code(&payload);
   if (bs_eq(status_code, BSV("101")) == false) {
-    WS_LOG_DEBUG("wrong error code: expected %s got \"" BSV_Fmt "\"\n", "101",
+    WS_LOG_DEBUG("wrong error code: expected %s got \"" BSV_Fmt "\"", "101",
                  BSV_Arg(status_code));
     return WS_CONNECTION_FAILURE;
   }
@@ -322,5 +397,9 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
   _ws_verify_websocket_sec_key(ctx, sec_websocket_key, response_sec_key->value);
   _ws_verify_sub_protocol();
 
+  const ssize_t io_event_read_size = ws_read_raw(ctx, buffer, 1024);
+  assert(io_event_read_size > 1);
+  Ws_FrameHeader header = websocket_buffer_to_frame_header(buffer, 0);
+  _print_ws_frame(&header);
   return WS_SUCCESS;
 }
