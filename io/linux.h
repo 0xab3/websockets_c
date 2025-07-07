@@ -1,55 +1,53 @@
 #ifndef __LINUX_IO_H__
 #define __LINUX_IO_H__
+#include "io/internal_completions.h"
 #include "io/io_uring.h"
-#include "libs/dyn_array.h"
 #include <linux/io_uring.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
 
-typedef int(io_completion_cb)(uint8_t *buffer, size_t buffer_len,
-                              void *userdata);
-typedef struct onCompletion {
-  io_completion_cb *completion_cb;
-  void *userdata;
-} onCompletion;
+typedef struct Io {
+  struct IoUring uring;
+  CompletionList completed;
+} Io;
 
-typedef DA_TYPE_NEW(onCompletion) onCompletions;
-typedef DA_TYPE_NEW(struct io_uring_cqe) ioUringCompletionArray;
+typedef enum IO_SUBMIT_STATUS {
+  IO_SUCCESS,
+  IO_QUEUE_NEEDS_FLUSH
+} IO_SUBMIT_STATUS;
+typedef enum IO_POLL_STATUS {
+  IO_POLL_SUCCESS,
+  IO_POLL_QUEUE_REQUIRE_FLUSH, // same as IO_QUEUE_NEEDS_FLUSH
+  IO_POLL_COMPLETION_RUNNING,
+} IO_POLL_STATUS;
 
-typedef struct io {
-  struct ioUring uring;
-  atomic_uint_least64_t n_promises;
-  ioUringCompletionArray completion_array;
-  onCompletions on_completions;
-} io;
+struct Io io_init(void);
+bool io_ring_needs_enter(IoUring *uring);
+IO_SUBMIT_STATUS io_prepare_read_with_cb(struct Io *io_ctx, int fd,
+                                         uint8_t *buff, size_t len,
+                                         Completion *completion,
+                                         io_completion_cb callback,
+                                         void *userdata);
+IO_SUBMIT_STATUS io_prepare_write_with_cb(struct Io *io_ctx, int fd,
+                                          uint8_t *buff, size_t len,
+                                          Completion *completion,
+                                          io_completion_cb callback,
+                                          void *userdata);
+bool io_queue_require_flush(struct Io *io_ctx);
+bool io_is_queue_empty(struct Io *io_ctx);
+int io_queue_flush(struct Io *io_ctx);
+ssize_t io_get_processed_event_result(struct Io *io_ctx);
+struct io_uring_cqe *io_run_loop_until_completion(struct Io *io_ctx,
+                                                  Completion *completion);
+IO_SUBMIT_STATUS io_prepare_read(struct Io *io_ctx, int fd, uint8_t *buff,
+                                 size_t len, Completion *completion);
+IO_SUBMIT_STATUS io_prepare_write(struct Io *io_ctx, int fd, uint8_t *buff,
+                                  size_t len, Completion *completion);
+IO_POLL_STATUS io_poll_completion(struct Io *io_ctx, Completion *completion);
+size_t io_completion_list_flush(struct Io *io_ctx);
 
-// TODO(shahzad): move this shit to sm async specific thingy idk
-typedef enum PROMISE_STATE {
-  PROMISE_FAILED,
-  PROMISE_RUNNING,
-  PROMISE_COMPLETED
-} PROMISE_STATE;
-
-typedef struct Promise {
-  uint64_t promise_id;
-  PROMISE_STATE status;
-  intptr_t result;
-} Promise;
-
-struct io io_init(void);
-int io_send_write_event(struct io *io_ctx, int fd, const uint8_t *buff,
-                        size_t len, io_completion_cb callback, void *userdata);
-int io_send_read_event(struct io *io_ctx, int fd, const uint8_t *buff,
-                       size_t len, io_completion_cb callback, void *userdata);
-ssize_t io_get_processed_event_result(struct io *io_ctx);
-struct io_uring_cqe *io_run_loop_until_completion(struct io *io_ctx,
-                                                  onCompletion *completion);
-Promise io_async_read(struct io *io_ctx, int fd, const uint8_t *buff,
-                      size_t len);
-Promise io_async_write(struct io *io_ctx, int fd, const uint8_t *buff,
-                       size_t len);
-PROMISE_STATE io_promise_poll(struct io *io_ctx, Promise *promise);
-intptr_t io_promise_result(Promise *promise);
+void io_run_loop_once(struct Io *io_ctx, struct __kernel_timespec timeout);
 #endif // __LINUX_IO_H__
