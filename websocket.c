@@ -1,5 +1,10 @@
-#include "websocket.h"
+#include <iso646.h>
+#include <linux/time_types.h>
+#include <stdatomic.h>
+#define _XOPEN_SOURCE 500
+#include "io/internal_completions.h"
 #include "libs/extint.h"
+#include "websocket.h"
 #ifdef __linux__
 #include "io/linux.h"
 #endif
@@ -163,7 +168,7 @@ static inline ALLOCATOR_STATUS _http_parse_header(_httpPayload *payload,
                                .value = bs_builder_to_sv(&owned_value)});
     _LOG_DEBUG("key: \"" BSV_Fmt "\"", BSV_Arg(key));
     _LOG_DEBUG("value: \"" BSV_Fmt "\"", BSV_Arg(value));
-    _LOG_DEBUG("");
+    _LOG_DEBUG(" ");
   }
   return ALLOCATOR_SUCCESS;
 }
@@ -208,17 +213,38 @@ WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx) {
   return WS_SUCCESS;
 }
 
-ssize_t ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len) {
-  Promise promise = io_async_write(&ctx->io_ctx, ctx->tcp_fd, data, len);
-  while (io_promise_poll(&ctx->io_ctx, &promise) != PROMISE_COMPLETED)
-    ;
-  assert(promise.status == PROMISE_COMPLETED);
-  struct io_uring_cqe *cqe =
-      (struct io_uring_cqe *)(uintptr_t)io_promise_result(&promise);
-  const ssize_t bytes_wrote = cqe->res;
+ssize_t ws_write_raw(Ws_Context *ctx, uint8_t *data, size_t len) {
 
-  WS_LOG_DEBUG("written %ld bytes out of %lu", bytes_wrote, len);
-  return bytes_wrote;
+  Completion completion = {0};
+  IO_SUBMIT_STATUS submit_status =
+      io_prepare_write(&ctx->io_ctx, ctx->tcp_fd, data, len, &completion);
+  if (submit_status == IO_QUEUE_NEEDS_FLUSH) {
+    WS_LOG_DEBUG("io queue requires flush! flushing...");
+    const int ret = io_queue_flush(&ctx->io_ctx);
+    WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
+                 strerror(errno));
+    assert(ret > 0);
+
+    IO_SUBMIT_STATUS submit_status_again =
+        io_prepare_write(&ctx->io_ctx, ctx->tcp_fd, data, len, &completion);
+    assert(submit_status_again == IO_SUCCESS);
+  }
+
+  const int ret = io_queue_flush(&ctx->io_ctx);
+  WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
+               strerror(errno));
+  assert(ret > 0);
+
+  IO_POLL_STATUS io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
+  while (io_poll_status != IO_POLL_SUCCESS) {
+    assert(io_poll_status != IO_POLL_QUEUE_REQUIRE_FLUSH);
+    io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
+  }
+
+  const ssize_t bytes_read = completion.res;
+  WS_LOG_DEBUG("WS_WRITE returned with %ld, STATUS: %s", bytes_read,
+               strerror(errno));
+  return bytes_read;
 }
 
 static inline bool _verify_utf8(const char *data, size_t len) {
@@ -229,13 +255,36 @@ static inline bool _verify_utf8(const char *data, size_t len) {
 }
 // todo(shahzad): refactor this
 static ssize_t ws_read_raw(Ws_Context *ctx, uint8_t *buff, size_t len) {
-  Promise promise = io_async_read(&ctx->io_ctx, ctx->tcp_fd, buff, len);
-  while (io_promise_poll(&ctx->io_ctx, &promise) != PROMISE_COMPLETED)
-    ;
-  assert(promise.status == PROMISE_COMPLETED);
-  struct io_uring_cqe *cqe =
-      (struct io_uring_cqe *)(uintptr_t)io_promise_result(&promise);
-  const ssize_t bytes_read = cqe->res;
+  static Completion completion = {0};
+
+  IO_SUBMIT_STATUS submit_status =
+      io_prepare_read(&ctx->io_ctx, ctx->tcp_fd, buff, len, &completion);
+  if (submit_status == IO_QUEUE_NEEDS_FLUSH) {
+    WS_LOG_DEBUG("io queue requires flush! flushing...");
+    const int ret = io_queue_flush(&ctx->io_ctx);
+    WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
+                 strerror(errno));
+    assert(ret > 0);
+
+    IO_SUBMIT_STATUS submit_status_again =
+        io_prepare_read(&ctx->io_ctx, ctx->tcp_fd, buff, len, &completion);
+    assert(submit_status_again == IO_SUCCESS);
+  }
+
+  const int ret = io_queue_flush(&ctx->io_ctx);
+  WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
+               strerror(errno));
+  assert(ret > 0);
+
+  IO_POLL_STATUS io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
+  WS_LOG_DEBUG("polling for completion!");
+  while (io_poll_status != IO_POLL_SUCCESS) {
+    WS_LOG_DEBUG("completion return %u!", io_poll_status);
+    assert(io_poll_status != IO_POLL_QUEUE_REQUIRE_FLUSH);
+    io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
+  }
+
+  const ssize_t bytes_read = completion.res;
   WS_LOG_DEBUG("WS_READ returned with %ld, STATUS: %s", bytes_read,
                strerror(errno));
   return bytes_read;
@@ -267,10 +316,6 @@ static bool _ws_verify_websocket_sec_key(Ws_Context *ctx,
 
   const uint8_t *sha1_digest_array = digest._As.u8;
   const size_t sha1_digest_array_len = sizeof(digest._As.u8);
-  for (size_t i = 0; i < sha1_digest_array_len; i++) {
-    printf("%x", sha1_digest_array[i]);
-  }
-  printf("\n");
 
   assert(sha1_digest_array_len == 5 * 4);
 
@@ -336,14 +381,14 @@ void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
   _LOG_TODO("add functionality to append custom headers provided by the "
             "user");
 
-  BetterString_View result_str = bs_builder_to_sv(&upgrade_request);
+  BetterString_ViewManaged result_str =
+      bs_builder_to_managed_sv(&upgrade_request);
   _LOG_DEBUG("==============================");
   _LOG_DEBUG(BSV_Fmt, BSV_Arg(result_str));
   _LOG_DEBUG("==============================");
 
   // todo(shahzad)!!!!!!!!!!!!!!: handle memory management with io_uring
-  bytes_wrote =
-      ws_write_raw(ctx, (const uint8_t *)result_str.view, result_str.len);
+  bytes_wrote = ws_write_raw(ctx, (uint8_t *)result_str.view, result_str.len);
   assert((size_t)bytes_wrote == result_str.len);
   // bs_builder_destory(&upgrade_request);
 }
@@ -396,10 +441,45 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
       _http_payload_header_get(&payload, BSV("Sec-WebSocket-Accept"));
   _ws_verify_websocket_sec_key(ctx, sec_websocket_key, response_sec_key->value);
   _ws_verify_sub_protocol();
-
-  const ssize_t io_event_read_size = ws_read_raw(ctx, buffer, 1024);
-  assert(io_event_read_size > 1);
-  Ws_FrameHeader header = websocket_buffer_to_frame_header(buffer, 0);
-  _print_ws_frame(&header);
   return WS_SUCCESS;
+}
+void ws_on_message(Ws_Context *ctx, Ws_OnMessageCallback *cb, void *userdata) {
+  ctx->on_message_cb = cb;
+  ctx->on_message_userdata = userdata;
+}
+static int _on_data(Completion *result, void *_userdata) {
+  Ws_RawMessageUserData *userdata = (Ws_RawMessageUserData *)_userdata;
+  WS_LOG_DEBUG("read sm shit idk ");
+  WS_LOG_DEBUG("contents:");
+  assert(result->res > 0);
+  printf("%.*s", result->res, userdata->buffer);
+  assert(userdata->ctx != NULL);
+  ws_add_raw_read_cb(userdata->ctx);
+  return 0;
+}
+IO_SUBMIT_STATUS ws_add_raw_read_cb(Ws_Context *ctx) {
+  static Completion completion = {0};
+  Io *io_ctx = &ctx->io_ctx;
+  static char buff[1024] = {0};
+  static Ws_RawMessageUserData userdata = {.buffer = buff};
+  userdata.ctx = ctx;
+
+  return io_prepare_read_with_cb(io_ctx, ctx->tcp_fd, (uint8_t *)buff, 1024,
+                                 &completion, &_on_data, &userdata);
+}
+bool ws_process_events(Ws_Context *ctx) {
+  Io *io_ctx = &ctx->io_ctx;
+  if (!io_is_queue_empty(io_ctx)) {
+    io_queue_flush(io_ctx);
+  }
+  io_run_loop_once(io_ctx, (struct __kernel_timespec){.tv_nsec = 10});
+  Completion *completion = io_ctx->completed.head;
+  while (completion != NULL) {
+    completion->completion_cb(completion, (void *)completion->userdata);
+    completion_list_remove(&io_ctx->completed, completion);
+
+    completion = completion->next;
+  }
+
+  return true;
 }

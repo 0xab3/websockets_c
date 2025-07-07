@@ -1,4 +1,5 @@
 #include "websocket.h"
+#include <time.h>
 
 #define BS_IMPLEMENTATION
 #include "./libs/bs.h"
@@ -6,6 +7,9 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+internal void on_message(Ws_Message message, void *userdata) {
+  _LOG_DEBUG("%.*s\n", (int)message.size, message.data);
+}
 int main(void) {
   const char *host = "127.0.0.1";
   const uint16_t port = 5000;
@@ -21,6 +25,10 @@ int main(void) {
 
     return EXIT_FAILURE;
   }
+  // ws_on_message(&ctx, &on_message, NULL);
+  ws_add_raw_read_cb(&ctx);
 
+  while (ws_process_events(&ctx)) {
+  }
   return EXIT_SUCCESS;
 }

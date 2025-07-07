@@ -25,6 +25,7 @@
   &(Ws_Options){.host = _host, .port = 80, .is_tls = false, .path = "/"}
 #define SEC_WEBSOCKET_KEY_LEN 24
 #define WS_MAX_HEADER_LENGTH 14
+#define WS_EVENT_LOOP_MAX_WAIT_MS 10
 
 #define WS_LOG_DEBUG _LOG_DEBUG
 #define WS_LOG_WARN _LOG_WARN
@@ -54,6 +55,13 @@ typedef struct Ws_AllocatorContext {
   opaque_ptr_t ctx;
 } Ws_AllocatorContext;
 
+typedef struct Ws_Message {
+  enum { WS_MESSAGE_BINARY, WS_MESSAGE_TEXT } type;
+  char *data;
+  size_t size;
+} Ws_Message;
+typedef void(Ws_OnMessageCallback)(Ws_Message message, void *userdata);
+
 typedef struct Ws_Options {
   const char *host;
   const char *path; // null terminated
@@ -65,8 +73,9 @@ typedef struct Ws_Options {
 typedef struct Ws_Context {
   struct Ws_AllocatorContext allocator_ctx; // mark(unused)
   struct Ws_Options opts;
-  struct io io_ctx;
-  opaque_ptr_t data;
+  struct Io io_ctx;
+  Ws_OnMessageCallback *on_message_cb;
+  void *on_message_userdata;
   int tcp_fd;
   char padding[4];
 } Ws_Context;
@@ -82,7 +91,10 @@ typedef struct __attribute__((packed)) Ws_FrameHeader {
   uint8_t *payload_data;
 } Ws_FrameHeader;
 
-typedef void(Ws_Handler)(const char *data, size_t len, opaque_ptr_t userdata);
+typedef struct Ws_RawMessageUserData {
+  char *buffer;
+  Ws_Context *ctx;
+} Ws_RawMessageUserData;
 
 // i really don't wanna write a uri parser so user will have to
 // rawdog the host and port
@@ -90,9 +102,10 @@ Ws_Context ws_context_new(opaque_ptr_t allocator, Ws_Options *opts);
 WS_STATUS ws_connect(Ws_Context *ctx);
 WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx)
     __attribute_nonnull__((1));
-ssize_t ws_write_raw(Ws_Context *ctx, const uint8_t *data, size_t len);
-void ws_on(const char *event, Ws_Handler *handler);
+ssize_t ws_write_raw(Ws_Context *ctx, uint8_t *data, size_t len);
 void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
                         size_t sec_websocket_key_len);
-WS_STATUS ws_run_loop(Ws_Context *ctx);
+void ws_on_message(Ws_Context *ctx, Ws_OnMessageCallback *cb, void *userdata);
+bool ws_process_events(Ws_Context *ctx);
+IO_SUBMIT_STATUS ws_add_raw_read_cb(Ws_Context *ctx);
 #endif // __WEBSOCKET_H__
