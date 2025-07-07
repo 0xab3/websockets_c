@@ -2,6 +2,7 @@
 #define __BS_H__
 
 #include "libs/allocator.h"
+#include "libs/extint.h"
 #include "utils.h"
 #include <assert.h>
 #include <ctype.h>
@@ -373,15 +374,6 @@ bs_builder_to_managed_sv(BetterString_Builder *builder) {
                                     .len = builder->string.len};
 }
 
-// type conversion is ass so implementing this shit
-static inline size_t log2i(size_t number) {
-  size_t bits = 0;
-  while (number != 0) {
-    number = number >> 1;
-    bits++;
-  }
-  return bits;
-}
 BSDEF ALLOCATOR_STATUS bs_builder_reserve(BetterString_Builder *builder,
                                           size_t capacity) {
   return bs_builder_reserve_exact(builder, (size_t)1 << log2i(capacity));

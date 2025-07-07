@@ -44,12 +44,12 @@
 #define ARRAY_LEN(xs) sizeof(xs) / sizeof(xs[0])
 #define _TODO(...) assert(0 && "TODO: "__VA_ARGS__)
 
-#define _LIKELY(x) __builtin_expect((bool)x, 1);
-#define _UNLIKELY(x) __builtin_expect((bool)x, 0);
+#define _LIKELY(x) __builtin_expect(!!(x), 1)
+#define _UNLIKELY(x) __builtin_expect(!!(x), 0)
 
 // why do even cstdlib exist =|
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) (((a) > (b) ? (a) : (b)))
+#define MIN(a, b) (((a) < (b) ? (a) : (b)))
 
 #define ROTL64(value, rotation)                                                \
   (((value) << (rotation)) | ((value) >> (64 - (rotation))))

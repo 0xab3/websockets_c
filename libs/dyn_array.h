@@ -46,11 +46,35 @@
     __result_ptr = (xs).items + (xs).len - 1;                                  \
   } while (0);
 
-#define da_remove_swap(xs, index)                                              \
+#define reserve_clamp(new_cap, cap)                                            \
   do {                                                                         \
-    xs.items[index] = xs.items[xs.len];                                        \
-    xs.len -= 1;                                                               \
+    size_t bits = 0;                                                           \
+    size_t old_cap = cap;                                                      \
+    while (old_cap != 0) {                                                     \
+      old_cap = old_cap >> 1;                                                  \
+      bits++;                                                                  \
+    }                                                                          \
+    new_cap = ((cap & (cap - 1)) == 0 ? cap : (1) << bits);                    \
   } while (0);
+
+#define da_append_many(da, xs, count, __result_ptr)                            \
+  do {                                                                         \
+    __result_ptr = NULL;                                                       \
+    if ((da).len + count >= (da).capacity) {                                   \
+      reserve_clamp((da).capacity, (da).len + count);                          \
+      void *tmp_realloc = DA_REALLOC((da).allocator_ctx, (da).items,           \
+                                     (da).capacity * (sizeof(*(da).items)));   \
+      if (tmp_realloc == NULL) {                                               \
+        break;                                                                 \
+      }                                                                        \
+      (da).items = tmp_realloc;                                                \
+    }                                                                          \
+    memcpy((da).items + (da).len, (xs), count * sizeof(da.items[0]));          \
+    __result_ptr = (da).items + (da).len;                                      \
+    (da).len += count;                                                         \
+  } while (0);
+
+#define da_remove_swap(xs, index) (xs).items[(index)] = (xs).items[--(xs).len];
 
 #define da_remove_ordered(xs, index)                                           \
   do {                                                                         \
@@ -63,7 +87,7 @@
     }                                                                          \
   } while (0)
 
-#define da_pop(xs) xs.len < 1 ? NULL : xs.items[--xs.len]
+#define da_pop(xs) xs.len < 1 ? NULL : xs.items + --xs.len
 
 #define da_deinit(alloc_ctx, array)                                            \
   do {                                                                         \

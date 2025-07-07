@@ -1,5 +1,6 @@
 #ifndef __EXTRA_INT_H__
 #define __EXTRA_INT_H__
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -18,6 +19,7 @@ void uint32_array_to_be_bytes(const uint32_t *input, size_t len,
                               uint8_t *output);
 void uint16_array_to_be_bytes(const uint16_t *input, size_t len,
                               uint8_t *output);
+size_t log2i(size_t number);
 uint16_t to_le16(uint16_t value) {
   return (uint16_t)((value >> 8) | (value << 8));
 }
@@ -92,5 +94,14 @@ void uint16_array_to_be_bytes(const uint16_t *input, size_t len,
     temp_output[1] = (uint8_t)(input[i] & 0xFF);
     memcpy(output + i * 2, temp_output, 2);
   }
+}
+// type conversion is ass so implementing this shit
+size_t log2i(size_t number) {
+  size_t bits = 0;
+  while (number != 0) {
+    number = number >> 1;
+    bits++;
+  }
+  return bits;
 }
 #endif

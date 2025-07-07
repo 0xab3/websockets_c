@@ -45,11 +45,11 @@ BASE64_STATUS base64_encode(const uint8_t *__restrict buffer, size_t len,
     output_buffer_idx += 2;
     break;
   case 2:
-    output_quad[0] = ((unsigned char)buffer[aligned_3_byte_len + 0] >> 2);
-    output_quad[1] = (((buffer[aligned_3_byte_len + 0] & 3) << 4) |
-                      ((buffer[aligned_3_byte_len + 1] >> 4))) &
-                     0x3f;
-    output_quad[2] = (buffer[aligned_3_byte_len + 1] << 2) & 0x3f;
+    output_quad[0] = (char)((unsigned char)buffer[aligned_3_byte_len + 0] >> 2);
+    output_quad[1] = (char)((((buffer[aligned_3_byte_len + 0] & 3) << 4) |
+                             ((buffer[aligned_3_byte_len + 1] >> 4))) &
+                            0x3f);
+    output_quad[2] = (char)((buffer[aligned_3_byte_len + 1] << 2) & 0x3f);
     _base64_value_for_data(output_quad, 3, output_buffer + output_buffer_idx);
     output_buffer_idx += 3;
     break;
@@ -157,11 +157,11 @@ static __always_inline void _base64_to_data(const char *data, size_t size,
                                             char *output_buffer) {
   for (size_t i = 0; i < size; i++) {
     if (data[i] >= 'A' && data[i] <= 'Z') {
-      output_buffer[i] = data[i] - 'A';
+      output_buffer[i] = (char)(data[i] - 'A');
     } else if (data[i] >= 'a' && data[i] <= 'z') {
-      output_buffer[i] = data[i] - 'a' + 26;
+      output_buffer[i] = (char)(data[i] - 'a' + 26);
     } else if (isdigit(data[i])) {
-      output_buffer[i] = data[i] - '0' + 52;
+      output_buffer[i] = (char)(data[i] - '0' + 52);
     } else if (data[i] == '+') {
       output_buffer[i] = 62;
     } else if (data[i] == '/') {
