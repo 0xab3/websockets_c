@@ -43,13 +43,14 @@ typedef struct {
 #define BS_REALLOC(allocator_ctx, ...) realloc(__VA_ARGS__);
 #define BS_FREE(allocator_ctx, ...) free(__VA_ARGS__);
 
+typedef struct BetterString {
+  char *data;
+  size_t len;
+  size_t capacity;
+} BetterString;
 typedef struct {
   opaque_ptr_t allocator_ctx;
-  struct {
-    char *data;
-    size_t len;
-    size_t capacity;
-  } string;
+  struct BetterString string;
 } BetterString_Builder;
 
 // stolen from tsoding
@@ -87,6 +88,8 @@ static __always_inline void bs_builder_reset(BetterString_Builder *builder);
 BSDEF BetterString_View bs_builder_to_sv(BetterString_Builder *builder);
 BSDEF BetterString_ViewManaged
 bs_builder_to_managed_sv(BetterString_Builder *builder);
+BSDEF bool bs_builder_has_enough_capacity(BetterString_Builder *builder,
+                                          size_t required);
 BSDEF ALLOCATOR_STATUS bs_builder_reserve(BetterString_Builder *builder,
                                           size_t capacity);
 BSDEF ALLOCATOR_STATUS bs_builder_reserve_exact(BetterString_Builder *builder,
@@ -124,8 +127,7 @@ BSDEF BetterString_ViewManaged bs_clone(opaque_ptr_t allocator_ctx,
   return managed;
 }
 BSDEF BetterString_View bs_trim(BetterString_View str) {
-  if (str.len == 0)
-    return str;
+  if (str.len == 0) return str;
   assert(str.view != NULL);
   BetterString_View trimmed = str;
   trimmed = bs_trim_right(trimmed);
@@ -133,8 +135,7 @@ BSDEF BetterString_View bs_trim(BetterString_View str) {
   return trimmed;
 }
 BSDEF BetterString_View bs_trim_right(BetterString_View str) {
-  if (str.len == 0)
-    return str;
+  if (str.len == 0) return str;
   assert(str.view != NULL);
   BetterString_View trimmed = str;
   size_t idx = str.len - 1;
@@ -202,8 +203,6 @@ BSDEF BetterString_View bs_split_once_by_bs(BetterString_View *str,
 
   BetterString_View chopped = {0};
   const ssize_t idx = bs_find(*str, bs_delim);
-  // todo(shahzad): remove this shit
-  assert(idx != -1);
   if (idx == -1) {
     return chopped;
   }
@@ -223,7 +222,6 @@ BSDEF BetterString_View bs_split_once_by_delim(BetterString_View *str,
   const ssize_t char_idx = bs_char_at(*str, delim);
   // todo(shahzad): remove this shit
   if (char_idx == -1) {
-    assert(0);
     return chopped;
   }
   assert((size_t)char_idx <= str->len);
@@ -374,6 +372,11 @@ bs_builder_to_managed_sv(BetterString_Builder *builder) {
                                     .len = builder->string.len};
 }
 
+BSDEF bool bs_builder_has_enough_capacity(BetterString_Builder *builder,
+                                          size_t required) {
+  const size_t available = builder->string.capacity - builder->string.len;
+  return available > required;
+}
 BSDEF ALLOCATOR_STATUS bs_builder_reserve(BetterString_Builder *builder,
                                           size_t capacity) {
   return bs_builder_reserve_exact(builder, (size_t)1 << log2i(capacity));
@@ -393,8 +396,7 @@ BSDEF ALLOCATOR_STATUS bs_builder_reserve_exact(BetterString_Builder *builder,
 
 BSDEF ALLOCATOR_STATUS bs_builder_append_sv(BetterString_Builder *builder,
                                             const BetterString_View string) {
-  const size_t available = builder->string.capacity - builder->string.len;
-  if (available < string.len) {
+  if (!bs_builder_has_enough_capacity(builder, string.len)) {
     ALLOCATOR_STATUS is_reserved =
         bs_builder_reserve(builder, builder->string.capacity + string.len);
     if (is_reserved != ALLOCATOR_SUCCESS) {
@@ -433,9 +435,9 @@ bs_builder_vsprintf(BetterString_Builder *builder, const char *fmt,
   }
   va_list args_copy2;
   va_copy(args_copy2, args);
-  const ssize_t bytes_wrote =
-      vsnprintf((*builder).string.data + (*builder).string.len,
-                (*builder).string.capacity - (*builder).string.len, fmt, args_copy2);
+  const ssize_t bytes_wrote = vsnprintf(
+      (*builder).string.data + (*builder).string.len,
+      (*builder).string.capacity - (*builder).string.len, fmt, args_copy2);
   va_end(args_copy2);
   (*builder).string.len += (size_t)formatted_len;
   return bytes_wrote;

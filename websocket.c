@@ -1,19 +1,25 @@
-#include <iso646.h>
-#include <linux/time_types.h>
-#include <stdatomic.h>
 #define _XOPEN_SOURCE 500
-#include "io/internal_completions.h"
-#include "libs/extint.h"
-#include "websocket.h"
-#ifdef __linux__
-#include "io/linux.h"
-#endif
+
+#include <fcntl.h>
+
+#ifndef BIO_IMPLEMENTATION
+#define BIO_IMPLEMENTATION
+#endif // BIO_IMPLEMENTATION
+#include "libs/buff_io.h"
+
 #include "libs/allocator.h"
 #include "libs/base64.h"
+
+#ifdef __linux
+#include "libs/crng_linux.c"
+#endif
+
 #include "libs/dyn_array.h"
 #include "libs/rng_xoroshiro.c"
+
 #include "libs/sha1.h"
 #include "libs/utils.h"
+#include <linux/time_types.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -48,6 +54,9 @@ typedef struct _secWebsocketKey {
   char data[SEC_WEBSOCKET_KEY_LEN];
 } _secWebsocketKey;
 
+internal ssize_t ws__write_raw(Ws_Context *ctx, char *data, size_t len);
+internal ssize_t ws__read_raw(Ws_Context *ctx, char *buff, size_t len);
+internal ssize_t write_exact(int fd, const char *buff, size_t len);
 internal void _print_ws_as_hex(uint8_t *data, size_t len) {
   printf("==============================\n");
   for (size_t i = 0; i < len; i++) {
@@ -55,58 +64,58 @@ internal void _print_ws_as_hex(uint8_t *data, size_t len) {
   }
   printf("==============================\n");
 }
-internal void _print_ws_frame(const Ws_FrameHeader *frame) {
-  printf("Ws_Frame {\n");
-  printf("  fin: %u\n", frame->fin);
-  printf("  rsv1: %u\n", frame->rsv1);
-  printf("  rsv2: %u\n", frame->rsv2);
-  printf("  rsv3: %u\n", frame->rsv3);
-  printf("  opcode: %u\n", frame->opcode);
-  printf("  mask: %u\n", frame->masking_key);
-  printf("  payload_len: %lu\n", frame->payload_len);
-  BetterString_View svd = bs_escape(
-      bs_from_string((char *)frame->payload_data, frame->payload_len));
-  printf("  payload_data: \"%.*s\"\n", BSV_Arg(svd));
-  printf("}\n");
-}
+// internal void _print_ws_frame(const Ws_FrameHeader *frame) {
+// printf("Ws_Frame {\n");
+// printf("  fin: %u\n", frame->fin);
+// printf("  rsv1: %u\n", frame->rsv1);
+// printf("  rsv2: %u\n", frame->rsv2);
+// printf("  rsv3: %u\n", frame->rsv3);
+// printf("  opcode: %u\n", frame->opcode);
+// printf("  mask: %u\n", frame->masking_key);
+// printf("  payload_len: %lu\n", frame->payload_len);
+// BetterString_View svd = bs_escape(
+//     bs_from_string((char *)frame->payload_data, frame->payload_len));
+// printf("  payload_data: \"%.*s\"\n", BSV_Arg(svd));
+// printf("}\n");
+// }
 
-internal Ws_FrameHeader websocket_buffer_to_frame_header(uint8_t *buffer,
-                                                         size_t len) {
-  size_t buffer_idx = 0;
-  const uint8_t fin = buffer[buffer_idx] >> 7;
-  const uint8_t rsv1 = (buffer[buffer_idx] >> 6) & 0x1;
-  const uint8_t rsv2 = (buffer[buffer_idx] >> 5) & 0x1;
-  const uint8_t rsv3 = (buffer[buffer_idx] >> 4) & 0x1;
-  const uint8_t opcode = buffer[buffer_idx] & 0xf;
-  buffer_idx++;
-  const uint8_t mask = buffer[buffer_idx] >> 7;
-  uint32_t masking_key = 0;
-  uint64_t payload_len = buffer[buffer_idx] & 0x7f;
-  buffer_idx++;
-  if (payload_len == 126) {
-    payload_len = to_le16(*(uint16_t *)(buffer + buffer_idx));
-    buffer_idx += 2;
-
-  } else if (payload_len == 127) {
-    payload_len = to_le64(*(uint64_t *)(buffer + buffer_idx));
-    buffer_idx += 8;
-  }
-  if (mask == 1) {
-    masking_key = to_le32(*(uint32_t *)(buffer + buffer_idx));
-    buffer_idx += 4;
-  }
-  Ws_FrameHeader header = (Ws_FrameHeader){
-      .fin = fin,
-      .rsv1 = rsv1,
-      .rsv2 = rsv2,
-      .rsv3 = rsv3,
-      .opcode = opcode,
-      .payload_len = payload_len,
-      .masking_key = masking_key,
-      .payload_data = buffer + buffer_idx,
-  };
-  return header;
-}
+// internal Ws_FrameHeader websocket_buffer_to_frame_header(uint8_t *buffer,
+//                                                          size_t len) {
+//   size_t buffer_idx = 0;
+//   const uint8_t fin = buffer[buffer_idx] >> 7;
+//   const uint8_t rsv1 = (buffer[buffer_idx] >> 6) & 0x1;
+//   const uint8_t rsv2 = (buffer[buffer_idx] >> 5) & 0x1;
+//   const uint8_t rsv3 = (buffer[buffer_idx] >> 4) & 0x1;
+//   const uint8_t opcode = buffer[buffer_idx] & 0xf;
+//   buffer_idx++;
+//   const uint8_t mask = buffer[buffer_idx] >> 7;
+//   uint32_t masking_key = 0;
+//   uint64_t payload_len = buffer[buffer_idx] & 0x7f;
+//   buffer_idx++;
+//   if (payload_len == 126) {
+//     payload_len = to_le16(*(uint16_t *)(buffer + buffer_idx));
+//     buffer_idx += 2;
+//
+//   } else if (payload_len == 127) {
+//     payload_len = to_le64(*(uint64_t *)(buffer + buffer_idx));
+//     buffer_idx += 8;
+//   }
+//   if (mask == 1) {
+//     masking_key = to_le32(*(uint32_t *)(buffer + buffer_idx));
+//     buffer_idx += 4;
+//   }
+//   Ws_FrameHeader header = (Ws_FrameHeader){
+//       .fin = fin,
+//       .rsv1 = rsv1,
+//       .rsv2 = rsv2,
+//       .rsv3 = rsv3,
+//       .opcode = opcode,
+//       .payload_len = payload_len,
+//       .masking_key = masking_key,
+//       .payload_data = buffer + buffer_idx,
+//   };
+//   return header;
+// }
 
 static _httpHeader *_http_payload_header_get(_httpPayload *payload,
                                              BetterString_View key) {
@@ -127,50 +136,34 @@ static inline void _http_payload_append_header(_httpPayload *payload,
   da_append(*payload, http_header, result);
   assert(result != NULL);
 }
-static inline ALLOCATOR_STATUS _http_parse_header(_httpPayload *payload,
-                                                  BetterString_View *request) {
+static inline _httpHeader _http_parse_header(_httpPayload *payload,
+                                             BetterString_View *request) {
+  BetterString_View http_header = bs_trim(*request);
 
-  // _TODO("FIXME!: this function can't return allocator status.");
-  // todo(shahzad)!: use arena allocator
-  if (payload->http_line.view == NULL || payload->http_line.len == 0) {
-    BetterString_View http_line = bs_split_once_by_bs(request, BSV("\r\n"));
+  if (http_header.len == 0) _UNREACHABLE("empty http header!");
 
-    payload->http_line = bs_clone(payload->allocator_ctx, http_line);
-    if (payload->http_line.view == NULL) {
-      return ALLOCATOR_OUT_OF_MEMORY;
-    }
-    _LOG_DEBUG("http line: " BSV_Fmt, BSV_Arg(http_line));
-  }
-  while (request->len > 0) {
-    BetterString_View http_header =
-        bs_trim(bs_split_once_by_bs(request, BSV("\r\n")));
-    if (http_header.len == 0) {
-      break;
-    }
+  BetterString_View key = bs_trim(bs_split_once_by_delim(&http_header, ':'));
+  BetterString_View value = bs_trim(http_header);
 
-    BetterString_View key = bs_trim(bs_split_once_by_delim(&http_header, ':'));
-    BetterString_View value = bs_trim(http_header);
+  // note(shahzad)!: write directly to arena allocator instead of bs_builders
+  BetterString_Builder owned_key = bs_builder_new(payload->allocator_ctx);
+  BetterString_Builder owned_value = bs_builder_new(payload->allocator_ctx);
 
-    // note(shahzad)!: write directly to arena allocator instead of bs_builders
-    BetterString_Builder owned_key = bs_builder_new(payload->allocator_ctx);
-    BetterString_Builder owned_value = bs_builder_new(payload->allocator_ctx);
+  bs_builder_reserve_exact(&owned_key, key.len);
+  bs_builder_reserve_exact(&owned_value, value.len);
+  bs_builder_append_sv(&owned_key, key);
+  bs_builder_append_sv(&owned_value, value);
 
-    bs_builder_reserve_exact(&owned_key, key.len);
-    bs_builder_reserve_exact(&owned_value, value.len);
-    bs_builder_append_sv(&owned_key, key);
-    bs_builder_append_sv(&owned_value, value);
+  assert(owned_key.string.len == key.len);
+  assert(owned_value.string.len == value.len);
 
-    assert(owned_key.string.len == key.len);
-    assert(owned_value.string.len == value.len);
+  _http_payload_append_header(
+      payload, (_httpHeader){.key = bs_builder_to_sv(&owned_key),
+                             .value = bs_builder_to_sv(&owned_value)});
+  _LOG_DEBUG("key: \"" BSV_Fmt "\"", BSV_Arg(key));
+  _LOG_DEBUG("value: \"" BSV_Fmt "\"", BSV_Arg(value));
 
-    _http_payload_append_header(
-        payload, (_httpHeader){.key = bs_builder_to_sv(&owned_key),
-                               .value = bs_builder_to_sv(&owned_value)});
-    _LOG_DEBUG("key: \"" BSV_Fmt "\"", BSV_Arg(key));
-    _LOG_DEBUG("value: \"" BSV_Fmt "\"", BSV_Arg(value));
-    _LOG_DEBUG(" ");
-  }
-  return ALLOCATOR_SUCCESS;
+  return (_httpHeader){0};
 }
 
 static inline BetterString_View _http_status_code(_httpPayload *payload) {
@@ -189,6 +182,7 @@ static inline BetterString_View _http_status_code(_httpPayload *payload) {
 // note(shahzad): this doesn't look good
 Ws_Context ws_context_new(opaque_ptr_t allocator_ctx, Ws_Options *opts) {
   Ws_Context ctx = {
+      .crng_ctx = crng_init(),
       .allocator_ctx = {.ctx = allocator_ctx},
       .opts = *opts,
   };
@@ -208,86 +202,17 @@ WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx) {
   if (connect_status == -1) {
     return WS_CONNECTION_FAILURE;
   }
-  ctx->tcp_fd = tcp_socket_fd;
-  ctx->io_ctx = io_init();
+  // should we do allocator shit?
+  static char buffer[BUFIO_DEFAULT_BUFFER_SIZE] = {0};
+  BufReader_init(&ctx->tcp_reader, tcp_socket_fd, buffer,
+                 BUFIO_DEFAULT_BUFFER_SIZE);
   return WS_SUCCESS;
-}
-
-ssize_t ws_write_raw(Ws_Context *ctx, uint8_t *data, size_t len) {
-
-  Completion completion = {0};
-  IO_SUBMIT_STATUS submit_status =
-      io_prepare_write(&ctx->io_ctx, ctx->tcp_fd, data, len, &completion);
-  if (submit_status == IO_QUEUE_NEEDS_FLUSH) {
-    WS_LOG_DEBUG("io queue requires flush! flushing...");
-    const int ret = io_queue_flush(&ctx->io_ctx);
-    WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
-                 strerror(errno));
-    assert(ret > 0);
-
-    IO_SUBMIT_STATUS submit_status_again =
-        io_prepare_write(&ctx->io_ctx, ctx->tcp_fd, data, len, &completion);
-    assert(submit_status_again == IO_SUCCESS);
-  }
-
-  const int ret = io_queue_flush(&ctx->io_ctx);
-  WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
-               strerror(errno));
-  assert(ret > 0);
-
-  IO_POLL_STATUS io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
-  while (io_poll_status != IO_POLL_SUCCESS) {
-    assert(io_poll_status != IO_POLL_QUEUE_REQUIRE_FLUSH);
-    io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
-  }
-
-  const ssize_t bytes_read = completion.res;
-  WS_LOG_DEBUG("WS_WRITE returned with %ld, STATUS: %s", bytes_read,
-               strerror(errno));
-  return bytes_read;
 }
 
 static inline bool _verify_utf8(const char *data, size_t len) {
   _UNUSED(data);
   _UNUSED(len);
-  _LOG_WARN("unimplemented!");
   return true;
-}
-// todo(shahzad): refactor this
-static ssize_t ws_read_raw(Ws_Context *ctx, uint8_t *buff, size_t len) {
-  static Completion completion = {0};
-
-  IO_SUBMIT_STATUS submit_status =
-      io_prepare_read(&ctx->io_ctx, ctx->tcp_fd, buff, len, &completion);
-  if (submit_status == IO_QUEUE_NEEDS_FLUSH) {
-    WS_LOG_DEBUG("io queue requires flush! flushing...");
-    const int ret = io_queue_flush(&ctx->io_ctx);
-    WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
-                 strerror(errno));
-    assert(ret > 0);
-
-    IO_SUBMIT_STATUS submit_status_again =
-        io_prepare_read(&ctx->io_ctx, ctx->tcp_fd, buff, len, &completion);
-    assert(submit_status_again == IO_SUCCESS);
-  }
-
-  const int ret = io_queue_flush(&ctx->io_ctx);
-  WS_LOG_DEBUG("io_queue_flush: returned with %d, status %s", ret,
-               strerror(errno));
-  assert(ret > 0);
-
-  IO_POLL_STATUS io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
-  WS_LOG_DEBUG("polling for completion!");
-  while (io_poll_status != IO_POLL_SUCCESS) {
-    WS_LOG_DEBUG("completion return %u!", io_poll_status);
-    assert(io_poll_status != IO_POLL_QUEUE_REQUIRE_FLUSH);
-    io_poll_status = io_poll_completion(&ctx->io_ctx, &completion);
-  }
-
-  const ssize_t bytes_read = completion.res;
-  WS_LOG_DEBUG("WS_READ returned with %ld, STATUS: %s", bytes_read,
-               strerror(errno));
-  return bytes_read;
 }
 
 static bool _ws_verify_websocket_sec_key(Ws_Context *ctx,
@@ -387,10 +312,39 @@ void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
   _LOG_DEBUG(BSV_Fmt, BSV_Arg(result_str));
   _LOG_DEBUG("==============================");
 
-  // todo(shahzad)!!!!!!!!!!!!!!: handle memory management with io_uring
-  bytes_wrote = ws_write_raw(ctx, (uint8_t *)result_str.view, result_str.len);
+  bytes_wrote = ws__write_raw(ctx, result_str.view, result_str.len);
   assert((size_t)bytes_wrote == result_str.len);
-  // bs_builder_destory(&upgrade_request);
+  bs_builder_destory(&upgrade_request);
+}
+internal _httpPayload ws__http_read_header(Ws_Context *ctx) {
+  _httpPayload payload = {0};
+  static char buffer[1024] = {0};
+
+  ssize_t bytes_read =
+      BufReader_read_until(&ctx->tcp_reader, buffer, 1024, "\r\n");
+  if (bytes_read == -1 || bytes_read == BUFIO_ERROR_CONNECTION_CLOSED) {
+    WS_LOG_DEBUG("failed to read %ld: %s\n", bytes_read, strerror(errno));
+    assert(0 && "not handled");
+  }
+  BetterString_View line_as_view = bs_from_string(buffer, bytes_read);
+  payload.http_line = bs_clone(ctx->allocator_ctx.ctx, bs_trim(line_as_view));
+  while (true) {
+    bytes_read = BufReader_read_until(&ctx->tcp_reader, buffer, 1024, "\r\n");
+    if (bytes_read == -1 || bytes_read == BUFIO_ERROR_CONNECTION_CLOSED) {
+      WS_LOG_DEBUG("failed to read until %ld: %s\n", bytes_read,
+                   strerror(errno));
+      assert(0 && "not handled");
+    }
+    line_as_view = bs_from_string(buffer, (size_t)bytes_read);
+    WS_LOG_DEBUG("read line \"" BSV_Fmt "\"", BSV_Arg(bs_trim(line_as_view)));
+
+    // this means that we have parsed the header completely
+    if (bs_eq(line_as_view, BSV("\r\n"))) return payload;
+
+    _verify_utf8(line_as_view.view, line_as_view.len);
+
+    _http_parse_header(&payload, &line_as_view);
+  }
 }
 WS_STATUS ws_connect(Ws_Context *ctx) {
   if (ctx->opts.is_tls == true) {
@@ -407,30 +361,8 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
 
   ws_do_http_upgrade(ctx, sec_websocket_key.view, sec_websocket_key.len);
 
-  // todo(shahzad)!: use allocator
-  static uint8_t buffer[1024] = {0};
-  const ssize_t bytes_read = ws_read_raw(ctx, buffer, 1024);
-  if (bytes_read == -1) {
-    return WS_CONNECTION_FAILURE;
-  }
-  _verify_utf8((const char *)buffer, (size_t)bytes_read);
-  BetterString_View read_data =
-      bs_from_string((const char *)buffer, (size_t)bytes_read);
+  _httpPayload payload = ws__http_read_header(ctx);
 
-  WS_LOG_DEBUG(
-      "got http response: ==================================\n" BSV_Fmt,
-      BSV_Arg(read_data));
-  WS_LOG_DEBUG("=====================================================");
-
-  _httpPayload payload = {0};
-  _http_parse_header(&payload, &read_data);
-
-  if (read_data.len != 0) { // couldn't parse all of the header
-    _TODO("implement streaming data to http parser.");
-    memmove(buffer, read_data.view, read_data.len);
-    read_data.view = (const char *)buffer;
-  }
-  // todo(shahzad)!: this should be an integer
   const BetterString_View status_code = _http_status_code(&payload);
   if (bs_eq(status_code, BSV("101")) == false) {
     WS_LOG_DEBUG("wrong error code: expected %s got \"" BSV_Fmt "\"", "101",
@@ -443,43 +375,83 @@ WS_STATUS ws_connect(Ws_Context *ctx) {
   _ws_verify_sub_protocol();
   return WS_SUCCESS;
 }
-void ws_on_message(Ws_Context *ctx, Ws_OnMessageCallback *cb, void *userdata) {
-  ctx->on_message_cb = cb;
-  ctx->on_message_userdata = userdata;
+internal int32_t ws__get_masking_key(Ws_Context *ctx) {
+  return crng_next_i32(&ctx->crng_ctx);
 }
-static int _on_data(Completion *result, void *_userdata) {
-  Ws_RawMessageUserData *userdata = (Ws_RawMessageUserData *)_userdata;
-  WS_LOG_DEBUG("read sm shit idk ");
-  WS_LOG_DEBUG("contents:");
-  assert(result->res > 0);
-  printf("%.*s", result->res, userdata->buffer);
-  assert(userdata->ctx != NULL);
-  ws_add_raw_read_cb(userdata->ctx);
-  return 0;
-}
-IO_SUBMIT_STATUS ws_add_raw_read_cb(Ws_Context *ctx) {
-  static Completion completion = {0};
-  Io *io_ctx = &ctx->io_ctx;
-  static char buff[1024] = {0};
-  static Ws_RawMessageUserData userdata = {.buffer = buff};
-  userdata.ctx = ctx;
 
-  return io_prepare_read_with_cb(io_ctx, ctx->tcp_fd, (uint8_t *)buff, 1024,
-                                 &completion, &_on_data, &userdata);
-}
-bool ws_process_events(Ws_Context *ctx) {
-  Io *io_ctx = &ctx->io_ctx;
-  if (!io_is_queue_empty(io_ctx)) {
-    io_queue_flush(io_ctx);
+internal char *ws__mask_payload(Ws_Context *ctx, int32_t mask,
+                                const char *payload, size_t payload_len) {
+  _UNUSED(ctx);
+  // TODO(shahzad): switch to a temporary allocator
+  char *bytes =
+      WS_ALLOC(ctx->allocator_ctx.ctx, (sizeof(*payload) * payload_len));
+  for (size_t i = 0; i < payload_len; i++) {
+    bytes[i] = payload[i] ^ ((const char *)&mask)[i % 4];
   }
-  io_run_loop_once(io_ctx, (struct __kernel_timespec){.tv_nsec = 10});
-  Completion *completion = io_ctx->completed.head;
-  while (completion != NULL) {
-    completion->completion_cb(completion, (void *)completion->userdata);
-    completion_list_remove(&io_ctx->completed, completion);
+  return bytes;
+}
 
-    completion = completion->next;
+internal void ws_write_frame(Ws_Context *ctx, Ws_Frame frame) {
+  const int32_t masking_key = ws__get_masking_key(ctx);
+  uint8_t fin_and_opcode = (uint8_t)((frame.fin & 0x1) << 7) |
+                           (uint8_t)((frame.rsv & 0x7) << 4) |
+                           (uint8_t)(frame.opcode & 0xF);
+
+  write_exact((int)ctx->tcp_reader.fd, (char *)&fin_and_opcode,
+              sizeof(uint8_t));
+
+  uint8_t pre_payload_len = (uint8_t)frame.payload_len;
+  assert(pre_payload_len < 125);
+  if (frame.payload_len > 125) {
+    pre_payload_len = 126;
+    if (frame.payload_len > 0xffff) pre_payload_len = 127;
   }
 
-  return true;
+  assert(frame.mask);
+  if (frame.mask) pre_payload_len |= 0x80;
+
+  write_exact((int)ctx->tcp_reader.fd, (char *)&pre_payload_len,
+              sizeof(uint8_t));
+  write_exact((int)ctx->tcp_reader.fd, (const char *)&masking_key, 4);
+  const char *masked_payload =
+      ws__mask_payload(ctx, masking_key, frame.payload, frame.payload_len);
+  write_exact((int)ctx->tcp_reader.fd, masked_payload,
+              sizeof(*masked_payload) * frame.payload_len);
+}
+void ws_send_message(Ws_Context *ctx, const char *data, size_t len,
+                     bool is_binary) {
+  // TODO(shahzad): implement framing
+  Ws_Frame frame = {
+      .fin = 1,
+      .mask = 1,
+      .opcode = is_binary ? WS_FRAME_OP_BINARY : WS_FRAME_OP_TEXT,
+      .payload_len = len,
+      .payload = data,
+  };
+  ws_write_frame(ctx, frame);
+}
+internal ssize_t ws__write_raw(Ws_Context *ctx, char *data, size_t len) {
+  return write((int)ctx->tcp_reader.fd, data, len);
+}
+
+internal ssize_t ws__read_raw(Ws_Context *ctx, char *buff, size_t len) {
+  return BufReader_read(&ctx->tcp_reader, buff, len);
+}
+internal ssize_t write_exact(int fd, const char *buff, size_t len) {
+  assert(fd != -1);
+  size_t bytes_wrote = 0;
+  do {
+    ssize_t chunk_wrote = write(fd, buff + bytes_wrote, len - bytes_wrote);
+
+    if (chunk_wrote == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        continue;
+      } else return -1;
+    } else if (chunk_wrote == 0) return 0; // connection is closed
+
+    assert(chunk_wrote > 0);
+    bytes_wrote += (size_t)chunk_wrote;
+  } while ((size_t)bytes_wrote < len);
+  assert(bytes_wrote == len);
+  return (ssize_t)bytes_wrote;
 }

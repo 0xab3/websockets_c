@@ -1,12 +1,14 @@
 #include "websocket.h"
-#include <time.h>
-
+#define BIO_IMPLEMENTATION
+#include "./libs/buff_io.h"
 #define BS_IMPLEMENTATION
 #include "./libs/bs.h"
 #include <assert.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include <time.h>
 internal void on_message(Ws_Message message, void *userdata) {
   _LOG_DEBUG("%.*s\n", (int)message.size, message.data);
 }
@@ -25,10 +27,8 @@ int main(void) {
 
     return EXIT_FAILURE;
   }
-  // ws_on_message(&ctx, &on_message, NULL);
-  ws_add_raw_read_cb(&ctx);
 
-  while (ws_process_events(&ctx)) {
-  }
+  const char *message = "man wth is this shit bro idk what to do";
+  ws_send_message(&ctx, message, strlen(message), false);
   return EXIT_SUCCESS;
 }

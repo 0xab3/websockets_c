@@ -1,8 +1,9 @@
 #ifndef __WEBSOCKET_H__
 #define __WEBSOCKET_H__
 #include "./libs/bs.h"
-#ifdef __linux__
-#include "io/linux.h"
+#include "libs/buff_io.h"
+#ifdef __linux
+#include "libs/crng_linux.c"
 #endif
 #include "libs/utils.h"
 #include <arpa/inet.h>
@@ -14,7 +15,6 @@
 #include <sys/cdefs.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/uio.h>
 #include <unistd.h>
 
 #ifndef opaque_ptr_t
@@ -26,6 +26,7 @@
 #define SEC_WEBSOCKET_KEY_LEN 24
 #define WS_MAX_HEADER_LENGTH 14
 #define WS_EVENT_LOOP_MAX_WAIT_MS 10
+#define WS_MAX_FRAME_HEADER_LENGTH 14
 
 #define WS_LOG_DEBUG _LOG_DEBUG
 #define WS_LOG_WARN _LOG_WARN
@@ -57,9 +58,11 @@ typedef struct Ws_AllocatorContext {
 
 typedef struct Ws_Message {
   enum { WS_MESSAGE_BINARY, WS_MESSAGE_TEXT } type;
+  uint32_t padding[4];
   char *data;
   size_t size;
 } Ws_Message;
+
 typedef void(Ws_OnMessageCallback)(Ws_Message message, void *userdata);
 
 typedef struct Ws_Options {
@@ -72,28 +75,35 @@ typedef struct Ws_Options {
 
 typedef struct Ws_Context {
   struct Ws_AllocatorContext allocator_ctx; // mark(unused)
+  struct BufferReader tcp_reader;
   struct Ws_Options opts;
-  struct Io io_ctx;
   Ws_OnMessageCallback *on_message_cb;
   void *on_message_userdata;
-  int tcp_fd;
+  CryptoRngContext crng_ctx;
   char padding[4];
 } Ws_Context;
 
-typedef struct __attribute__((packed)) Ws_FrameHeader {
-  bool fin : 1;
-  uint8_t rsv1 : 1;
-  uint8_t rsv2 : 1;
-  uint8_t rsv3 : 1;
-  uint8_t opcode : 4;
-  uint64_t payload_len;
-  uint32_t masking_key;
-  uint8_t *payload_data;
-} Ws_FrameHeader;
+typedef enum WS_FRAME_OP_CODE {
+  WS_FRAME_OP_CONT = 0x0,
+  WS_FRAME_OP_TEXT = 0x1,
+  WS_FRAME_OP_BINARY = 0x2,
+  WS_FRAME_OP_CLOSE = 0x8,
+  WS_FRAME_OP_PING = 0x9,
+  WS_FRAME_OP_PONG = 0xa,
+} WS_FRAME_OP_CODE;
+typedef struct Ws_Frame {
+  uint8_t fin;  // both of these should be nuked
+  uint8_t mask; // this can be nuked i think
+  uint8_t rsv;
+  uint8_t padding;
+  WS_FRAME_OP_CODE opcode;
+  size_t payload_len;
+  const char *payload;
+} Ws_Frame;
 
 typedef struct Ws_RawMessageUserData {
-  char *buffer;
   Ws_Context *ctx;
+  BetterString_Builder *message_builder;
 } Ws_RawMessageUserData;
 
 // i really don't wanna write a uri parser so user will have to
@@ -102,10 +112,9 @@ Ws_Context ws_context_new(opaque_ptr_t allocator, Ws_Options *opts);
 WS_STATUS ws_connect(Ws_Context *ctx);
 WS_STATUS ws_establish_tcp_connection(Ws_Context *ctx)
     __attribute_nonnull__((1));
-ssize_t ws_write_raw(Ws_Context *ctx, uint8_t *data, size_t len);
 void ws_do_http_upgrade(Ws_Context *ctx, const char *sec_websocket_key,
                         size_t sec_websocket_key_len);
 void ws_on_message(Ws_Context *ctx, Ws_OnMessageCallback *cb, void *userdata);
-bool ws_process_events(Ws_Context *ctx);
-IO_SUBMIT_STATUS ws_add_raw_read_cb(Ws_Context *ctx);
+void ws_send_message(Ws_Context *ctx, const char *data, size_t len,
+                     bool is_binary);
 #endif // __WEBSOCKET_H__
