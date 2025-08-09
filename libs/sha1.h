@@ -29,7 +29,7 @@ uint32_t F_t(uint32_t t, uint32_t B, uint32_t C, uint32_t D);
 void sha1_print_digest(const sha1Digest *digest);
 
 static inline void read_block_be32(const uint8_t *src, uint32_t *dst,
-                              size_t words_count) {
+                                   size_t words_count) {
   for (size_t i = 0; i < words_count; i++) {
     dst[i] = read_be32(src + i * 4);
   }
@@ -48,32 +48,22 @@ void W_t(uint32_t *W, const uint32_t *block) {
     W[t] = block[t];
   }
   for (size_t t = 16; t < 80; t++) {
-    W[t] = ROTL32(W[t - 3] ^ W[t - 8] ^
-                              W[t - 14] ^ W[t - 16],
-                          1);
+    W[t] = ROTL32(W[t - 3] ^ W[t - 8] ^ W[t - 14] ^ W[t - 16], 1);
   }
   return;
 }
 inline uint32_t F_t(uint32_t t, uint32_t B, uint32_t C, uint32_t D) {
-  if (t <= 19)
-    return (B & C) | ((~B) & D);
-  else if (t <= 39)
-    return B ^ C ^ D;
-  else if (t <= 59)
-    return (B & C) | (B & D) | (C & D);
-  else if (t <= 79)
-    return B ^ C ^ D;
+  if (t <= 19) return (B & C) | ((~B) & D);
+  else if (t <= 39) return B ^ C ^ D;
+  else if (t <= 59) return (B & C) | (B & D) | (C & D);
+  else if (t <= 79) return B ^ C ^ D;
   _UNREACHABLE("t out of range: t <= 79");
 }
 inline uint32_t K_t(uint32_t t) {
-  if (t <= 19)
-    return 0x5A827999;
-  if (t <= 39)
-    return 0x6ED9EBA1;
-  if (t <= 59)
-    return 0x8F1BBCDC;
-  if (t <= 79)
-    return 0xCA62C1D6;
+  if (t <= 19) return 0x5A827999;
+  if (t <= 39) return 0x6ED9EBA1;
+  if (t <= 59) return 0x8F1BBCDC;
+  if (t <= 79) return 0xCA62C1D6;
   _UNREACHABLE("t out of range: t <= 79");
 }
 static inline void sha1_process_block(uint32_t *block, uint32_t *H) {
@@ -157,6 +147,7 @@ sha1Digest sha1_to_le(sha1Digest digest) {
 }
 
 void sha1_print_digest(const sha1Digest *digest) {
+  fprintf(stderr, "DEBUG: sha1_print_digest(): ");
   for (int i = 0; i < 5; ++i) {
     printf("%08x", digest->_As.u32[i]);
   }
